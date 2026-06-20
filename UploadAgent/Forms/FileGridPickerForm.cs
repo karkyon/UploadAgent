@@ -75,7 +75,8 @@ namespace UploadAgent.Forms
 
             // ── ヘッダー ──
             var headerPanel = new Panel { Dock = DockStyle.Top, Height = 72, BackColor = Color.White, Padding = new Padding(24, 0, 24, 0) };
-            headerPanel.Paint += (s, e) => {
+            headerPanel.Paint += (s, e) =>
+            {
                 using (var pen = new Pen(ColorSlate200, 1))
                     e.Graphics.DrawLine(pen, 0, headerPanel.Height - 1, headerPanel.Width, headerPanel.Height - 1);
             };
@@ -120,7 +121,8 @@ namespace UploadAgent.Forms
 
             // ── フッター ──
             var bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = Color.White, Padding = new Padding(24, 0, 24, 0) };
-            bottomPanel.Paint += (s, e) => {
+            bottomPanel.Paint += (s, e) =>
+            {
                 using (var pen = new Pen(ColorSlate200, 1))
                     e.Graphics.DrawLine(pen, 0, 0, bottomPanel.Width, 0);
             };
@@ -337,9 +339,9 @@ namespace UploadAgent.Forms
     internal class RoundButton : Button
     {
         private readonly Color _normalBg;
-        private readonly Color _hoverBorder;
         private Color _borderColor;
         private bool _isHover;
+        private const int Radius = 8;
 
         public RoundButton(string text, int w, int h, Color bg, Color fg, Color border, Color hoverBorder)
         {
@@ -348,28 +350,49 @@ namespace UploadAgent.Forms
             this.Height = h;
             this.FlatStyle = FlatStyle.Flat;
             this.FlatAppearance.BorderSize = 0;
-            this.BackColor = bg;
+            this.BackColor = Color.Transparent;
             this.ForeColor = fg;
             this.Font = new Font("Yu Gothic UI", 9f, FontStyle.Bold);
             this.Cursor = Cursors.Hand;
-            this.SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+            this.SetStyle(ControlStyles.UserPaint
+                        | ControlStyles.AllPaintingInWmPaint
+                        | ControlStyles.OptimizedDoubleBuffer
+                        | ControlStyles.ResizeRedraw
+                        | ControlStyles.SupportsTransparentBackColor, true);
             _normalBg = bg;
             _borderColor = border;
             this.MouseEnter += (s, e) => { _isHover = true; this.Invalidate(); };
             this.MouseLeave += (s, e) => { _isHover = false; this.Invalidate(); };
+            this.Resize += (s, e) => UpdateRegion();
+            UpdateRegion();
+        }
+
+        private void UpdateRegion()
+        {
+            var rect = new Rectangle(0, 0, this.Width, this.Height);
+            using (var path = RoundedPath(rect, Radius))
+            {
+                this.Region = new System.Drawing.Region(path);
+            }
         }
 
         protected override void OnPaint(PaintEventArgs pevent)
         {
             var g = pevent.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            var rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
-            int radius = 8;
 
-            using (var path = RoundedPath(rect, radius))
+            // 親の背景色でまずクリア（Region外にはみ出さないが、念のため）
+            g.Clear(this.Parent != null ? this.Parent.BackColor : Color.White);
+
+            var rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
+
+            using (var path = RoundedPath(rect, Radius))
             {
-                Color bg = _isHover ? ControlPaint.Light(_normalBg, 0.08f) : _normalBg;
-                if (_normalBg == Color.White) bg = _isHover ? Color.FromArgb(248, 250, 252) : Color.White;
+                Color bg = _normalBg;
+                if (_isHover)
+                {
+                    bg = (_normalBg == Color.White) ? Color.FromArgb(248, 250, 252) : ControlPaint.Light(_normalBg, 0.12f);
+                }
                 using (var brush = new SolidBrush(bg))
                     g.FillPath(brush, path);
                 using (var pen = new Pen(_borderColor, 1.4f))
@@ -396,6 +419,9 @@ namespace UploadAgent.Forms
     // ════════════════════════════════════════════════════════
     // Web版風カスタムチェックボックス（角丸・teal色のチェック）
     // ════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════
+    // Web版風カスタムチェックボックス（角丸・teal色のチェック）
+    // ════════════════════════════════════════════════════════
     internal class WebCheckBox : CheckBox
     {
         private static readonly Color ColorTeal600 = Color.FromArgb(13, 148, 136);
@@ -404,17 +430,37 @@ namespace UploadAgent.Forms
 
         public WebCheckBox()
         {
-            this.Text = "選択";
             this.AutoSize = true;
             this.Font = new Font("Yu Gothic UI", 8.5f);
             this.ForeColor = ColorSlate700;
-            this.SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            this.BackColor = Color.Transparent;
+            // 標準のチェックボックス描画を完全に無効化し、OnPaintのみで描画する
+            this.Appearance = Appearance.Normal;
+            this.SetStyle(ControlStyles.UserPaint
+                        | ControlStyles.AllPaintingInWmPaint
+                        | ControlStyles.OptimizedDoubleBuffer
+                        | ControlStyles.ResizeRedraw
+                        | ControlStyles.SupportsTransparentBackColor, true);
+            this.UpdateStyles();
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                // ボタン系の標準ビジュアルスタイル描画を抑止
+                return cp;
+            }
         }
 
         protected override void OnPaint(PaintEventArgs pevent)
         {
+            // base.OnPaint は呼ばない（標準のチェックボックス＋テキスト描画を完全に防ぐ）
             var g = pevent.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(this.Parent != null ? this.Parent.BackColor : Color.White);
+
             int boxSize = 16;
             int boxTop = (this.Height - boxSize) / 2;
             var boxRect = new Rectangle(0, boxTop, boxSize, boxSize);
@@ -444,9 +490,15 @@ namespace UploadAgent.Forms
                 }
             }
 
-            var textRect = new Rectangle(boxSize + 6, 0, this.Width - boxSize - 6, this.Height);
-            TextRenderer.DrawText(g, this.Text, this.Font, textRect, this.ForeColor,
-                TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+            var textRect = new Rectangle(boxSize + 6, 0, Math.Max(this.Width - boxSize - 6, 10), this.Height);
+            TextRenderer.DrawText(g, "選択", this.Font, textRect, this.ForeColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            this.Invalidate();
         }
 
         private static GraphicsPath RoundedRect(Rectangle rect, int radius)
