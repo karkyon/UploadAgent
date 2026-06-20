@@ -15,16 +15,18 @@ namespace UploadAgent
         private const string REGISTRY_VALUE = "MachCoreUploadAgent";
 
         // ── アプリケーション状態 ──────────────────────────────────
-        private static AppSettings    _settings;
-        private static AuditLogger    _logger;
-        private static StatsCounter   _stats;
-        private static SecurityGuard  _guard;
-        private static FileOperations _fileOps;
-        private static RouteHandler   _router;
-        private static HttpServer     _server;
-        private static NotifyIcon     _trayIcon;
-        private static string         _token;
-        private static bool           _hasError;
+        private static AppSettings       _settings;
+        private static AuditLogger       _logger;
+        private static StatsCounter      _stats;
+        private static SecurityGuard     _guard;
+        private static FileOperations    _fileOps;
+        private static RouteHandler   　 _router;
+        private static UploadCoordinator _uploadCoordinator;
+        private static Form            　_hiddenUiForm;
+        private static HttpServer        _server;
+        private static NotifyIcon        _trayIcon;
+        private static string            _token;
+        private static bool              _hasError;
 
         // アイコン（GDI+で動的生成 → .ico ファイル不要）
         private static Icon _iconNormal;
@@ -55,7 +57,10 @@ namespace UploadAgent
                 _token   = Guid.NewGuid().ToString();
                 _guard   = new SecurityGuard(_token);
                 _fileOps = new FileOperations(_logger, _guard, _stats);
-                _router  = new RouteHandler(_token, _guard, _fileOps, _logger, _settings);
+                _hiddenUiForm = new Form { ShowInTaskbar = false, WindowState = FormWindowState.Minimized, Opacity = 0 };
+                var _ = _hiddenUiForm.Handle; // ハンドル生成（Invoke利用のため）
+                _uploadCoordinator = new UploadCoordinator(_settings, _logger, _stats, _hiddenUiForm);
+                _router = new RouteHandler(_token, _guard, _fileOps, _logger, _settings, _uploadCoordinator);
 
                 // アイコン生成（カスタム指定 or 動的生成）
                 BuildIcons();
