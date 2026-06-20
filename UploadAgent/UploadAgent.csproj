@@ -53,6 +53,9 @@
     <Compile Include="AppSettings.cs" />
     <Compile Include="AuditLogger.cs" />
     <Compile Include="FileOperations.cs" />
+    <Compile Include="Forms\FileGridPickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Forms\SettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>

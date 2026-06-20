@@ -59,7 +59,7 @@ namespace UploadAgent
             return UploadFiles(ticket, paths);
         }
 
-        // ── フォルダ選択→フォルダ内全ファイルアップロード ────────────
+        // ── フォルダ選択→グリッドで選択させる→選択分だけアップロード ────────
         public PickUploadResponse PickFolderAndUpload(string ticket)
         {
             string folderPath = null;
@@ -79,10 +79,10 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = true, success = false };
             }
 
-            string[] paths;
+            string[] allFiles;
             try
             {
-                paths = Directory.GetFiles(folderPath, "*", SearchOption.TopDirectoryOnly);
+                allFiles = Directory.GetFiles(folderPath, "*", SearchOption.TopDirectoryOnly);
             }
             catch (Exception ex)
             {
@@ -90,12 +90,34 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = false, success = false, error = $"フォルダ読み取り失敗: {ex.Message}" };
             }
 
-            if (paths.Length == 0)
+            if (allFiles.Length == 0)
             {
                 return new PickUploadResponse { cancelled = false, success = false, error = "フォルダ内にファイルがありません" };
             }
 
-            return UploadFiles(ticket, paths);
+            // サムネイル付きグリッドで選択させる（UIスレッドで実行）
+            string[] selectedFiles = null;
+            bool gridCancelled = true;
+            _uiThreadMarshal.Invoke(new Action(() =>
+            {
+                using (var picker = new Forms.FileGridPickerForm(folderPath, allFiles))
+                {
+                    picker.ShowDialog();
+                    gridCancelled = picker.WasCancelled;
+                    if (!gridCancelled) selectedFiles = picker.SelectedFiles.ToArray();
+                }
+            }));
+
+            if (gridCancelled || selectedFiles == null || selectedFiles.Length == 0)
+            {
+                _logger.Info("PICK_UPLOAD_CANCELLED (folder grid selection)");
+                return new PickUploadResponse { cancelled = true, success = false };
+            }
+
+            _logger.Info($"FOLDER_GRID_SELECTED count={selectedFiles.Length} / total={allFiles.Length}");
+
+            // 選択されたファイルだけを、単体アップロードと同じロジックで順次処理
+            return UploadFiles(ticket, selectedFiles);
         }
 
         // ── 共通アップロード処理（チケットはAPI側で1回限り検証されるため、複数ファイルでも同一チケットを使い回さない） ──
