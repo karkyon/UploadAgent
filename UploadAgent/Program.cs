@@ -50,6 +50,7 @@ namespace UploadAgent
 
                 // 設定・ロガー初期化
                 _settings = AppSettings.Load();
+                MessageBox.Show($"読み込んだポート: {_settings.Port}\n読み込んだパス: {AppSettings.GetSettingsPathForDebug()}", "DEBUG");
                 _logger   = new AuditLogger { VerboseEnabled = _settings.VerboseLog };
                 _stats    = new StatsCounter();
 

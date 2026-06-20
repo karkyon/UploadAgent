@@ -151,8 +151,8 @@ namespace UploadAgent
                 using (var streamContent = new StreamContent(fileStream))
                 {
                     streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-                    content.Add(streamContent, "file", fileName);
                     content.Add(new StringContent(ticket), "ticket");
+                    content.Add(streamContent, "file", fileName);
 
                     HttpResponseMessage resp;
                     try
