@@ -77,29 +77,52 @@ namespace UploadAgent.Forms
         // ════════════════════════════════════════════════════════
         private void InitializeComponent()
         {
-            this.Text            = "MachCore UploadAgent - 設定";
-            this.Size            = new Size(680, 560);
-            this.MinimumSize     = new Size(680, 560);
-            this.StartPosition   = FormStartPosition.CenterScreen;
+            this.Text = "MachCore UploadAgent - 設定";
+            this.Size = new Size(680, 560);
+            this.MinimumSize = new Size(680, 560);
+            this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.Sizable;
-            this.MaximizeBox     = false;
+            this.MaximizeBox = false;
 
-            _tab = new TabControl { Dock = DockStyle.Fill };
+            // ── 下部ボタンパネル: Dockを使わず絶対位置+Anchorで固定配置する ──
+            // (TabControlとのDock解決順序トラブルを避けるため、明示的にy座標を計算する)
+            const int bottomPanelHeight = 48;
+            var pnlBottom = new Panel
+            {
+                Left = 0,
+                Top = this.ClientSize.Height - bottomPanelHeight,
+                Width = this.ClientSize.Width,
+                Height = bottomPanelHeight,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
+                BackColor = SystemColors.Control,
+            };
+            var btnSave = new Button { Text = "保存して再起動", Width = 140, Height = 34, Top = 7, Anchor = AnchorStyles.Right | AnchorStyles.Top, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            var btnCancel = new Button { Text = "キャンセル", Width = 100, Height = 34, Top = 7, Anchor = AnchorStyles.Right | AnchorStyles.Top };
+            btnCancel.Left = pnlBottom.Width - btnCancel.Width - 16;
+            btnSave.Left = btnCancel.Left - btnSave.Width - 10;
+            btnSave.Click += BtnSave_Click;
+            btnCancel.Click += (s, e) => this.Close();
+            pnlBottom.Controls.AddRange(new Control[] { btnSave, btnCancel });
+
+            // ── タブコントロール: 上端からpnlBottomの上端までを明示的に占有させる ──
+            _tab = new TabControl
+            {
+                Left = 0,
+                Top = 0,
+                Width = this.ClientSize.Width,
+                Height = this.ClientSize.Height - bottomPanelHeight,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
+            };
+
+            // pnlBottomを最後に追加することで必ず最前面(最後の描画=最上位Z-order)になり、
+            // _tabの内容に隠れることがなくなる
             this.Controls.Add(_tab);
+            this.Controls.Add(pnlBottom);
 
             BuildTabConnection();
             BuildTabStatus();
             BuildTabLog();
             BuildTabTrash();
-
-            // 下部ボタン
-            var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 48 };
-            var btnSave   = new Button { Text = "保存して再起動", Width = 140, Height = 34, Left = this.ClientSize.Width - 310, Top = 7, Anchor = AnchorStyles.Right | AnchorStyles.Bottom, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-            var btnCancel = new Button { Text = "キャンセル",     Width = 100, Height = 34, Left = this.ClientSize.Width - 160, Top = 7, Anchor = AnchorStyles.Right | AnchorStyles.Bottom };
-            btnSave.Click   += BtnSave_Click;
-            btnCancel.Click += (s, e) => this.Close();
-            pnlBottom.Controls.AddRange(new Control[] { btnSave, btnCancel });
-            this.Controls.Add(pnlBottom);
 
             // 統計タイマー（5秒ごとに更新）
             _statsTimer = new System.Windows.Forms.Timer { Interval = 5000 };
@@ -111,7 +134,7 @@ namespace UploadAgent.Forms
         // ── タブ①: 接続設定 ──────────────────────────────────────
         private void BuildTabConnection()
         {
-            var tab = new TabPage("⚙ 設定");
+            var tab = new TabPage("⚙ 設定") { AutoScroll = true };
             _tab.TabPages.Add(tab);
 
             int y = 20; int lx = 20; int cx = 180;
