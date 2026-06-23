@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Text;
+using System.Reflection;
 using System.Web.Script.Serialization;
 
 namespace UploadAgent
@@ -18,7 +19,7 @@ namespace UploadAgent
         public bool AutoStart { get; set; } = true;
         public bool ShowBalloonNotify { get; set; } = true;
         public bool VerboseLog { get; set; } = false;
-        public string CustomIconPath { get; set; } = "";
+        public string CustomIconPath { get; set; } = GetBundledIconPath();
         public string TrashFolderPath { get; set; } = ""; // 空文字 = 既定パスを使用
         public string UsbDrivePath { get; set; } = ""; // PG→USB転送先・写真/図取込デフォルトドライブ（空=未設定）
 
@@ -27,6 +28,23 @@ namespace UploadAgent
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "MachCore", "UploadAgent", "appsettings.json"
         );
+
+        /// <summary>
+        /// 実行ファイルと同じフォルダに同梱されている UploadAgent.ico への絶対パスを返す。
+        /// インストーラがbin\Release\の内容をそのままインストール先にコピーするため、
+        /// 実行ファイル(UploadAgent.exe)の隣に常にこのファイルが存在する前提。
+        /// 存在しない場合は空文字列を返し、GDI+動的生成アイコンへフォールバックする。
+        /// </summary>
+        private static string GetBundledIconPath()
+        {
+            try
+            {
+                var exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                var iconPath = Path.Combine(exeDir ?? "", "UploadAgent.ico");
+                return File.Exists(iconPath) ? iconPath : "";
+            }
+            catch { return ""; }
+        }
 
         public static AppSettings Load()
         {
