@@ -279,6 +279,7 @@ namespace UploadAgent
                             "設定を保存しました。", ToolTipIcon.Info);
                     }
                 });
+            form.Icon = _iconNormal; // ★追加: タイトルバーにトレイと同じMCロゴを表示
 
             form.Show();
         }
