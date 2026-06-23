@@ -64,7 +64,10 @@ namespace UploadAgent.Forms
 
         private void InitializeComponent(string folderPath, string fileType)
         {
-            int width = Cols * (CardW + 14) + 60;
+            int width = Cols * (CardW + 14)
+                                  + 48                                       // _flow の左右Padding(24+24)
+                                  + SystemInformation.VerticalScrollBarWidth // スクロールバー分
+                                  + 40;                                      // ウィンドウ枠の余裕
             string opLabel = fileType == "PHOTO" ? "📷 写真ファイル取込"
                             : fileType == "DRAWING" ? "📐 図ファイル取込"
                             : "📁 ファイル取込";

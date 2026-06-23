@@ -45,11 +45,31 @@ namespace UploadAgent
             {
                 using (var dlg = new OpenFileDialog())
                 {
-                    dlg.Title = fileType == "PHOTO" ? "MachCore - 📷 写真ファイルを選択"
-                              : fileType == "DRAWING" ? "MachCore - 📐 図ファイルを選択"
-                              : "MachCore - アップロードするファイルを選択";
+                    if (fileType == "PHOTO")
+                    {
+                        dlg.Title = "MachCore - 📷 写真ファイルを選択";
+                        dlg.Filter = "写真ファイル (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png|すべてのファイル (*.*)|*.*";
+                        dlg.FilterIndex = 1;
+                    }
+                    else if (fileType == "DRAWING")
+                    {
+                        dlg.Title = "MachCore - 📐 図ファイルを選択";
+                        dlg.Filter = "図面ファイル (*.tif;*.tiff;*.pdf)|*.tif;*.tiff;*.pdf|すべてのファイル (*.*)|*.*";
+                        dlg.FilterIndex = 1;
+                    }
+                    else if (fileType == "PROGRAM")
+                    {
+                        dlg.Title = "MachCore - 📄 プログラムファイルを選択";
+                        // PGメインファイルは拡張子なしが正規パターンのため、既定は「すべてのファイル」
+                        dlg.Filter = "プログラムファイル (*.min;*.spf;*.mpf;*.nc;*.cnc;*.tap;*.prg;*.gcode;*.g;*.txt)|*.min;*.spf;*.mpf;*.nc;*.cnc;*.tap;*.prg;*.gcode;*.g;*.txt|すべてのファイル (*.*)|*.*";
+                        dlg.FilterIndex = 2;
+                    }
+                    else
+                    {
+                        dlg.Title = "MachCore - アップロードするファイルを選択";
+                        dlg.Filter = "すべてのファイル (*.*)|*.*";
+                    }
                     dlg.Multiselect = false;
-                    dlg.Filter = "すべてのファイル (*.*)|*.*";
                     var result = dlg.ShowDialog(GetOwner());
                     if (result == DialogResult.OK) paths = new[] { dlg.FileName };
                 }
@@ -71,8 +91,9 @@ namespace UploadAgent
             {
                 using (var dlg = new FolderBrowserDialog())
                 {
-                    dlg.Description = fileType == "PHOTO" ? "MachCore - 写真ファイルが入っているフォルダを選択"
-                                     : fileType == "DRAWING" ? "MachCore - 図ファイルが入っているフォルダを選択"
+                    dlg.Description = fileType == "PHOTO" ? "MachCore - 📷 写真ファイルが入っているフォルダを選択"
+                                     : fileType == "DRAWING" ? "MachCore - 📐 図ファイルが入っているフォルダを選択"
+                                     : fileType == "PROGRAM" ? "MachCore - 📄 プログラムファイルが入っているフォルダを選択"
                                      : "MachCore - アップロードするフォルダを選択";
                     var result = dlg.ShowDialog(GetOwner());
                     if (result == DialogResult.OK) folderPath = dlg.SelectedPath;
@@ -96,8 +117,20 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = false, success = false, error = $"フォルダ読み取り失敗: {ex.Message}" };
             }
 
-            if (allFiles.Length == 0)
+            int totalCount = allFiles.Length;
+            allFiles = FilterFilesByType(allFiles, fileType);
+
+            if (totalCount == 0)
                 return new PickUploadResponse { cancelled = false, success = false, error = "フォルダ内にファイルがありません" };
+
+            if (allFiles.Length == 0)
+            {
+                string typeLabel = fileType == "PHOTO" ? "写真(jpg/jpeg/png)"
+                                  : fileType == "DRAWING" ? "図面(tif/tiff/pdf)"
+                                  : fileType == "PROGRAM" ? "プログラム"
+                                  : "対応";
+                return new PickUploadResponse { cancelled = false, success = false, error = $"フォルダ内に{typeLabel}ファイルが見つかりません（全{totalCount}件中0件）" };
+            }
 
             string[] selectedFiles = null;
             bool gridCancelled = true;
@@ -117,8 +150,34 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = true, success = false };
             }
 
-            _logger.Info($"FOLDER_GRID_SELECTED count={selectedFiles.Length} / total={allFiles.Length}");
+            _logger.Info($"FOLDER_GRID_SELECTED count={selectedFiles.Length} / filtered={allFiles.Length} / total={totalCount}");
             return UploadFiles(ticket, selectedFiles);
+        }
+
+        // fileTypeに応じてファイル一覧を絞り込む
+        private static string[] FilterFilesByType(string[] files, string fileType)
+        {
+            if (fileType == "PHOTO")
+            {
+                var exts = new HashSet<string> { ".jpg", ".jpeg", ".png" };
+                return files.Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant())).ToArray();
+            }
+            if (fileType == "DRAWING")
+            {
+                var exts = new HashSet<string> { ".tif", ".tiff", ".pdf" };
+                return files.Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant())).ToArray();
+            }
+            if (fileType == "PROGRAM")
+            {
+                var exts = new HashSet<string> { ".min", ".spf", ".mpf", ".nc", ".cnc", ".tap", ".prg", ".gcode", ".g", ".txt" };
+                // PGメインファイルは拡張子なしが正規パターンのため、拡張子なしファイルも許容
+                return files.Where(f =>
+                {
+                    var e = Path.GetExtension(f);
+                    return e == "" || exts.Contains(e.ToLowerInvariant());
+                }).ToArray();
+            }
+            return files; // fileType不明時は全件（後方互換）
         }
 
         private PickUploadResponse UploadFiles(string ticket, string[] paths)
