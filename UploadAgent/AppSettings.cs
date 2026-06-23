@@ -20,6 +20,7 @@ namespace UploadAgent
         public bool VerboseLog { get; set; } = false;
         public string CustomIconPath { get; set; } = "";
         public string TrashFolderPath { get; set; } = ""; // 空文字 = 既定パスを使用
+        public string UsbDrivePath { get; set; } = ""; // PG→USB転送先・写真/図取込デフォルトドライブ（空=未設定）
 
         // ── 静的ファクトリ ────────────────────────────────────────
         private static readonly string _settingsPath = Path.Combine(
@@ -43,6 +44,7 @@ namespace UploadAgent
                 if (dict.TryGetValue("verboseLog", out var v)) s.VerboseLog = Convert.ToBoolean(v);
                 if (dict.TryGetValue("customIconPath", out var ic)) s.CustomIconPath = ic?.ToString() ?? "";
                 if (dict.TryGetValue("trashFolderPath", out var tf)) s.TrashFolderPath = tf?.ToString() ?? "";
+                if (dict.TryGetValue("usbDrivePath", out var ud)) s.UsbDrivePath = ud?.ToString() ?? "";
                 return s;
             }
             catch { return new AppSettings(); }
@@ -63,6 +65,7 @@ namespace UploadAgent
                 ["verboseLog"] = VerboseLog,
                 ["customIconPath"] = CustomIconPath,
                 ["trashFolderPath"] = TrashFolderPath,
+                ["usbDrivePath"] = UsbDrivePath,
             };
             File.WriteAllText(_settingsPath, ser.Serialize(dict), Encoding.UTF8);
         }
@@ -88,6 +91,14 @@ namespace UploadAgent
             return Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "MachCore", "UploadAgent", "Trash");
+        }
+
+        /// <summary>
+        /// PG→USB転送先の実効パス。未設定ならnullを返す（呼び出し側でエラー処理）。
+        /// </summary>
+        public string GetUsbDrivePathOrNull()
+        {
+            return string.IsNullOrWhiteSpace(UsbDrivePath) ? null : UsbDrivePath;
         }
     }
 }

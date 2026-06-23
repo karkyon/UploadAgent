@@ -194,6 +194,125 @@ namespace UploadAgent
             return files;
         }
 
+        /// <summary>
+        /// PG→USB: チケットでAPIからファイル情報(Base64)を取得し、設定済みUSBドライブへ直接コピーする。
+        /// ダイアログは一切表示しない。完了後はAPI側へ完了通知を送ってチケットを破棄させる。
+        /// </summary>
+        public Models.PgToUsbResponse PgToUsb(string ticket, string apiBaseUrl)
+        {
+            var response = new Models.PgToUsbResponse();
+            var usbPath = _settings.GetUsbDrivePathOrNull();
+            if (usbPath == null)
+            {
+                response.success = false;
+                response.error = "USB転送先フォルダが設定されていません（設定画面で設定してください）";
+                _logger.Warn("PG_TO_USB_NO_DEST_CONFIGURED");
+                return response;
+            }
+            if (!Directory.Exists(usbPath))
+            {
+                response.success = false;
+                response.error = $"USB転送先フォルダが見つかりません: {usbPath}（USBが接続されているか確認してください）";
+                _logger.Warn($"PG_TO_USB_DEST_NOT_FOUND path=\"{usbPath}\"");
+                return response;
+            }
+
+            try
+            {
+                using (var client = new HttpClient(_sslBypassHandler, disposeHandler: false))
+                {
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                    var url = $"{apiBaseUrl.TrimEnd('/')}/mc/files/pg-info-by-ticket?ticket={Uri.EscapeDataString(ticket)}";
+                    var resp = client.GetAsync(url).GetAwaiter().GetResult();
+                    var bodyText = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        response.success = false;
+                        response.error = $"チケット情報取得失敗 (HTTP {(int)resp.StatusCode}): {bodyText}";
+                        _logger.Error($"PG_TO_USB_TICKET_FETCH_FAILED status={(int)resp.StatusCode} body=\"{bodyText}\"");
+                        return response;
+                    }
+
+                    Dictionary<string, object> info;
+                    try { info = _json.Deserialize<Dictionary<string, object>>(bodyText); }
+                    catch (Exception ex)
+                    {
+                        response.success = false;
+                        response.error = $"レスポンス解析失敗: {ex.Message}";
+                        return response;
+                    }
+
+                    if (!info.ContainsKey("files"))
+                    {
+                        response.success = false;
+                        response.error = "ファイル情報が取得できませんでした";
+                        return response;
+                    }
+
+                    var filesRaw = _json.Serialize(info["files"]);
+                    var fileList = _json.Deserialize<List<Dictionary<string, object>>>(filesRaw);
+
+                    if (fileList == null || fileList.Count == 0)
+                    {
+                        response.success = false;
+                        response.error = "プログラムファイルが見つかりません";
+                        return response;
+                    }
+
+                    string destDir = usbPath;
+                    // 複数ファイル（folderName指定あり）の場合はサブフォルダへ
+                    string folderName = fileList[0].ContainsKey("folderName") ? fileList[0]["folderName"]?.ToString() : null;
+                    if (!string.IsNullOrEmpty(folderName))
+                    {
+                        destDir = Path.Combine(usbPath, folderName);
+                        if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+                    }
+
+                    foreach (var f in fileList)
+                    {
+                        var name = f["name"]?.ToString();
+                        var content = f["content"]?.ToString();
+                        if (string.IsNullOrEmpty(name) || content == null) continue;
+
+                        var destPath = Path.Combine(destDir, name);
+                        var bytes = Convert.FromBase64String(content);
+                        File.WriteAllBytes(destPath, bytes);
+                        response.copiedFiles.Add(name);
+                        _logger.Info($"PG_TO_USB_COPIED file=\"{name}\" dest=\"{destPath}\"");
+                    }
+
+                    response.destPath = destDir;
+                    response.success = response.copiedFiles.Count > 0;
+                    if (!response.success) response.error = "ファイルのコピーに失敗しました";
+
+                    // 完了通知（チケット破棄）— Web側からも呼ばれるが、Agent側からも確実に送る
+                    try
+                    {
+                        var completeUrl = $"{apiBaseUrl.TrimEnd('/')}/mc/files/pg-to-usb-complete";
+                        var completeBody = new StringContent(
+                            _json.Serialize(new Dictionary<string, string> { ["ticket"] = ticket }),
+                            Encoding.UTF8, "application/json");
+                        client.PostAsync(completeUrl, completeBody).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"PG_TO_USB_COMPLETE_NOTIFY_FAILED err=\"{ex.Message}\"");
+                    }
+
+                    _stats.IncrementMoved();
+                    return response;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"PG_TO_USB_ERROR err=\"{ex.Message}\"");
+                response.success = false;
+                response.error = ex.Message;
+                return response;
+            }
+        }
+
         private PickUploadResponse UploadFiles(string ticket, string[] paths)
         {
             var response = new PickUploadResponse { cancelled = false };

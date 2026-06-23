@@ -52,7 +52,9 @@ namespace UploadAgent.Forms
         private ListBox _lbTrashFiles;
         private TextBox _txtTrashFolder;
         private Button _btnTrashFolderBrowse;
-        private Button _btnOpenTrashFolder;
+        private Button _btnOpenTrashFolder; 
+        private TextBox _txtUsbDrivePath;
+        private Button _btnUsbDriveBrowse;
 
         public SettingsForm(AppSettings settings, AuditLogger logger,
                             StatsCounter stats, FileOperations fileOps,
@@ -153,6 +155,26 @@ namespace UploadAgent.Forms
 
             y += 20;
             AddLabel(tab, "※ アイコンを省略するとデフォルトアイコンを使用します", lx, y + 10, Color.Gray);
+
+            y += 40;
+            var sep2 = new Label { Text = "─────────── PG→USB / 写真・図取込 既定ドライブ ───────────", Left = lx, Top = y, Width = 500, ForeColor = Color.Gray };
+            tab.Controls.Add(sep2);
+
+            y += 30;
+            AddLabel(tab, "USB転送先フォルダ:", lx, y);
+            _txtUsbDrivePath = new TextBox { Left = cx, Top = y - 2, Width = 300, ReadOnly = true, BackColor = SystemColors.Window };
+            _btnUsbDriveBrowse = new Button { Text = "参照...", Left = cx + 308, Top = y - 3, Width = 60, Height = 24 };
+            _btnUsbDriveBrowse.Click += (s, e) =>
+            {
+                using (var dlg = new FolderBrowserDialog { Description = "PG→USB転送先・写真/図取込の既定ドライブを選択", SelectedPath = _txtUsbDrivePath.Text })
+                {
+                    if (dlg.ShowDialog() == DialogResult.OK) _txtUsbDrivePath.Text = dlg.SelectedPath;
+                }
+            };
+            tab.Controls.AddRange(new Control[] { _txtUsbDrivePath, _btnUsbDriveBrowse });
+
+            y += 20;
+            AddLabel(tab, "※ MC詳細画面の「PG→USB」ボタンの転送先。未設定の場合PG→USBは使用できません", lx, y + 10, Color.Gray);
         }
 
         // ── タブ②: ステータス ────────────────────────────────────
@@ -303,6 +325,7 @@ namespace UploadAgent.Forms
             _chkVerbose.Checked = _settings.VerboseLog;
             _txtIconPath.Text = _settings.CustomIconPath;
             _txtTrashFolder.Text = _settings.GetEffectiveTrashRoot();
+            _txtUsbDrivePath.Text = _settings.UsbDrivePath;
         }
 
         private void RefreshStats()
@@ -454,6 +477,7 @@ namespace UploadAgent.Forms
             _settings.VerboseLog = _chkVerbose.Checked;
             _settings.CustomIconPath = _txtIconPath.Text.Trim();
             _settings.TrashFolderPath = _txtTrashFolder.Text.Trim();
+            _settings.UsbDrivePath = _txtUsbDrivePath.Text.Trim();
             _settings.Save();
 
             _onSaved?.Invoke(_settings);

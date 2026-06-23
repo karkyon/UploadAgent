@@ -31,3 +31,20 @@ namespace UploadAgent.Models
         public string error { get; set; }
     }
 }
+
+namespace UploadAgent.Models
+{
+    public class PgToUsbRequest
+    {
+        public string ticket { get; set; }
+        public string apiBaseUrl { get; set; }
+    }
+
+    public class PgToUsbResponse
+    {
+        public bool success { get; set; }
+        public List<string> copiedFiles { get; set; } = new List<string>();
+        public string destPath { get; set; }
+        public string error { get; set; }
+    }
+}

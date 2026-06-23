@@ -49,7 +49,7 @@ namespace UploadAgent
             if (method == "OPTIONS") { ctx.Response.StatusCode = 204; ctx.Response.Close(); return true; }
 
             // 操作系エンドポイント（move/delete/pick系）はOrigin検証必須
-            bool isStateChanging = (path == "/move" || path == "/delete" || path == "/pick-and-upload" || path == "/pick-folder-and-upload");
+            bool isStateChanging = (path == "/move" || path == "/delete" || path == "/pick-and-upload" || path == "/pick-folder-and-upload" || path == "/pg-to-usb");
             if (isStateChanging && !_guard.IsAllowedOrigin(origin, ExpectedOrigin))
             {
                 _logger.Warn($"ORIGIN_REJECTED path=\"{path}\" origin=\"{origin}\" expected=\"{ExpectedOrigin}\"");
@@ -67,6 +67,7 @@ namespace UploadAgent
                 case "/drives" when method == "GET": HandleDrives(ctx); return true;
                 case "/pick-and-upload" when method == "POST": HandlePickAndUpload(ctx, isFolder: false); return true;
                 case "/pick-folder-and-upload" when method == "POST": HandlePickAndUpload(ctx, isFolder: true); return true;
+                    bool isStateChanging = (path == "/move" || path == "/delete" || path == "/pick-and-upload" || path == "/pick-folder-and-upload" || path == "/pg-to-usb");
                 default: return false;
             }
         }
@@ -159,6 +160,41 @@ namespace UploadAgent
                 : _uploadCoordinator.PickFileAndUpload(pickReq.ticket, pickReq.fileType);
 
             SendJson(ctx, 200, result);
+        }
+
+        // ── POST /pg-to-usb ────────────────────────────────────────────────  
+        // Web は Bearerトークンを一切渡さず、ワンタイムチケットとPG→USB転送先のAPIベースURLを渡す。
+        // Agent はここでPG→USB転送を実行する。
+        private void HandlePgToUsb(HttpListenerContext ctx)
+        {
+            var reqToken = ctx.Request.Headers["X-Agent-Token"] ?? "";
+            if (!_guard.ValidateToken(reqToken))
+            {
+                _logger.Warn($"AUTH_FAIL reason=token_mismatch remote={ctx.Request.RemoteEndPoint} path=/pg-to-usb");
+                SendJson(ctx, 401, new { error = "Unauthorized: invalid token" });
+                return;
+            }
+
+            Models.PgToUsbRequest req;
+            try
+            {
+                var body = ReadBody(ctx.Request);
+                req = _json.Deserialize<Models.PgToUsbRequest>(body);
+            }
+            catch (Exception ex)
+            {
+                SendJson(ctx, 400, new { error = $"Invalid JSON: {ex.Message}" });
+                return;
+            }
+
+            if (req == null || string.IsNullOrEmpty(req.ticket) || string.IsNullOrEmpty(req.apiBaseUrl))
+            {
+                SendJson(ctx, 400, new { error = "ticket と apiBaseUrl が必要です" });
+                return;
+            }
+
+            var result = _uploadCoordinator.PgToUsb(req.ticket, req.apiBaseUrl);
+            SendJson(ctx, result.success ? 200 : 400, result);
         }
 
         private void SendJson(HttpListenerContext ctx, int statusCode, object obj)
