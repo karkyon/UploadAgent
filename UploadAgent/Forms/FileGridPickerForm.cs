@@ -433,22 +433,21 @@ namespace UploadAgent.Forms
     // ════════════════════════════════════════════════════════
     // Web版風カスタムチェックボックス（角丸・teal色のチェック）
     // ════════════════════════════════════════════════════════
-    // ════════════════════════════════════════════════════════
-    // Web版風カスタムチェックボックス（角丸・teal色のチェック）
-    // ════════════════════════════════════════════════════════
     internal class WebCheckBox : CheckBox
     {
         private static readonly Color ColorTeal600 = Color.FromArgb(13, 148, 136);
-        private static readonly Color ColorSlate300 = Color.FromArgb(203, 213, 225);
         private static readonly Color ColorSlate700 = Color.FromArgb(51, 65, 85);
 
         public WebCheckBox()
         {
-            this.AutoSize = true;
+            // ★修正: AutoSize=trueだと標準チェックボックスの寸法で自動計算されてしまい、
+            // カスタム描画(16px角丸ボックス+「選択」ラベル)とサイズが食い違ってレイアウトが崩れていた。
+            // 固定サイズに変更して描画内容と一致させる。
+            this.AutoSize = false;
+            this.Size = new Size(58, 22);
             this.Font = new Font("Yu Gothic UI", 8.5f);
             this.ForeColor = ColorSlate700;
             this.BackColor = Color.Transparent;
-            // 標準のチェックボックス描画を完全に無効化し、OnPaintのみで描画する
             this.Appearance = Appearance.Normal;
             this.SetStyle(ControlStyles.UserPaint
                         | ControlStyles.AllPaintingInWmPaint
@@ -463,14 +462,12 @@ namespace UploadAgent.Forms
             get
             {
                 var cp = base.CreateParams;
-                // ボタン系の標準ビジュアルスタイル描画を抑止
                 return cp;
             }
         }
 
         protected override void OnPaint(PaintEventArgs pevent)
         {
-            // base.OnPaint は呼ばない（標準のチェックボックス＋テキスト描画を完全に防ぐ）
             var g = pevent.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(this.Parent != null ? this.Parent.BackColor : Color.White);
@@ -479,7 +476,7 @@ namespace UploadAgent.Forms
             int boxTop = (this.Height - boxSize) / 2;
             var boxRect = new Rectangle(0, boxTop, boxSize, boxSize);
 
-            using (var path = RoundedRect(boxRect, 5)) // ★変更: 角丸を強調(4→5)
+            using (var path = RoundedRect(boxRect, 5))
             {
                 if (this.Checked)
                 {
@@ -488,7 +485,6 @@ namespace UploadAgent.Forms
                 }
                 else
                 {
-                    // ★変更: 未選択時の枠線を視認性の高い濃色・太めに変更
                     using (var brush = new SolidBrush(Color.White))
                         g.FillPath(brush, path);
                     using (var pen = new Pen(ColorSlate700, 2.2f))
