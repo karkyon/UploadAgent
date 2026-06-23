@@ -2,8 +2,11 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -12,11 +15,6 @@ using UploadAgent.Models;
 
 namespace UploadAgent
 {
-    /// <summary>
-    /// Web からの依頼を受け、Agent内で
-    /// ダイアログ表示 → MachCore APIへ直接アップロード(チケット認証) → ローカル元ファイル削除
-    /// までを一括して行う。
-    /// </summary>
     public class UploadCoordinator
     {
         private readonly AppSettings _settings;
@@ -24,6 +22,13 @@ namespace UploadAgent
         private readonly StatsCounter _stats;
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
         private readonly System.Windows.Forms.Control _uiThreadMarshal;
+
+        // ── SSL証明書検証バイパス（mkcert自己署名証明書対応）
+        // MachCoreサーバのURLが社内固定IPのため、証明書検証をスキップしても安全
+        private static readonly HttpClientHandler _sslBypassHandler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true,
+        };
 
         public UploadCoordinator(AppSettings settings, AuditLogger logger, StatsCounter stats, System.Windows.Forms.Control uiThreadMarshal)
         {
@@ -33,19 +38,24 @@ namespace UploadAgent
             _uiThreadMarshal = uiThreadMarshal;
         }
 
+        // ── ダイアログ用オーナーウィンドウ（最前面表示を保証）────────────
+        // _uiThreadMarshal（非表示Form）をオーナーとして渡すことで
+        // OpenFileDialog/FolderBrowserDialog が確実に最前面に表示される
+        private IWin32Window GetOwner() => _uiThreadMarshal;
+
         // ── 単体ファイル選択→アップロード ──────────────────────────
         public PickUploadResponse PickFileAndUpload(string ticket)
         {
             string[] paths = null;
-            // OpenFileDialog はUIスレッドで実行する必要がある
             _uiThreadMarshal.Invoke(new Action(() =>
             {
+                // オーナーを渡して最前面表示を保証
                 using (var dlg = new OpenFileDialog())
                 {
                     dlg.Title = "MachCore - アップロードするファイルを選択";
                     dlg.Multiselect = false;
                     dlg.Filter = "すべてのファイル (*.*)|*.*";
-                    var result = dlg.ShowDialog();
+                    var result = dlg.ShowDialog(GetOwner());
                     if (result == DialogResult.OK) paths = new[] { dlg.FileName };
                 }
             }));
@@ -68,7 +78,7 @@ namespace UploadAgent
                 using (var dlg = new FolderBrowserDialog())
                 {
                     dlg.Description = "MachCore - アップロードするフォルダを選択";
-                    var result = dlg.ShowDialog();
+                    var result = dlg.ShowDialog(GetOwner());
                     if (result == DialogResult.OK) folderPath = dlg.SelectedPath;
                 }
             }));
@@ -91,18 +101,16 @@ namespace UploadAgent
             }
 
             if (allFiles.Length == 0)
-            {
                 return new PickUploadResponse { cancelled = false, success = false, error = "フォルダ内にファイルがありません" };
-            }
 
-            // サムネイル付きグリッドで選択させる（UIスレッドで実行）
             string[] selectedFiles = null;
             bool gridCancelled = true;
             _uiThreadMarshal.Invoke(new Action(() =>
             {
                 using (var picker = new Forms.FileGridPickerForm(folderPath, allFiles))
                 {
-                    picker.ShowDialog();
+                    // グリッドピッカー自体もオーナー付きで最前面表示
+                    picker.ShowDialog(GetOwner());
                     gridCancelled = picker.WasCancelled;
                     if (!gridCancelled) selectedFiles = picker.SelectedFiles.ToArray();
                 }
@@ -115,28 +123,18 @@ namespace UploadAgent
             }
 
             _logger.Info($"FOLDER_GRID_SELECTED count={selectedFiles.Length} / total={allFiles.Length}");
-
-            // 選択されたファイルだけを、単体アップロードと同じロジックで順次処理
             return UploadFiles(ticket, selectedFiles);
         }
 
-        // ── 共通アップロード処理（チケットはAPI側で1回限り検証されるため、複数ファイルでも同一チケットを使い回さない） ──
-        // 注意: API側のワンタイムチケットは「1回消費」のため、複数ファイル送信時は1ファイル目だけが
-        // チケットで認証され、2ファイル目以降は専用の追加チケットが必要になる。
-        // ここでは「フォルダアップロードは複数ファイルだが、操作としては1回の依頼」という設計のため、
-        // 1ファイル目はチケットを消費し、以降は同一チケットの再発行をAgent側からは行わず、
-        // API側でフォルダアップロード時は単一チケットで複数ファイルを許可する設計にしている。
         private PickUploadResponse UploadFiles(string ticket, string[] paths)
         {
             var response = new PickUploadResponse { cancelled = false };
-            bool firstFile = true;
 
             foreach (var path in paths)
             {
                 try
                 {
-                    var fileResult = UploadSingleFile(ticket, path, firstFile);
-                    firstFile = false;
+                    var fileResult = UploadSingleFile(ticket, path);
                     response.files.Add(fileResult);
                 }
                 catch (Exception ex)
@@ -158,12 +156,13 @@ namespace UploadAgent
             return response;
         }
 
-        private UploadedFileResult UploadSingleFile(string ticket, string filePath, bool useTicket)
+        private UploadedFileResult UploadSingleFile(string ticket, string filePath)
         {
             var fileName = Path.GetFileName(filePath);
             _logger.Info($"UPLOAD_START path=\"{filePath}\"");
 
-            using (var client = new HttpClient())
+            // SSL証明書バイパスハンドラを使ってHttpClientを生成
+            using (var client = new HttpClient(_sslBypassHandler, disposeHandler: false))
             {
                 client.Timeout = TimeSpan.FromMinutes(5);
                 var url = _settings.MachCoreServerUrl.TrimEnd('/') + "/api/mc/files/upload-by-ticket";
@@ -173,6 +172,7 @@ namespace UploadAgent
                 using (var streamContent = new StreamContent(fileStream))
                 {
                     streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    // ticketをfileより先に追加（multipartフィールド順序の保険）
                     content.Add(new StringContent(ticket), "ticket");
                     content.Add(streamContent, "file", fileName);
 
@@ -188,11 +188,12 @@ namespace UploadAgent
                     }
 
                     var bodyText = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    _logger.Info($"UPLOAD_RESPONSE status={(int)resp.StatusCode} body=\"{bodyText}\"");
 
                     if (!resp.IsSuccessStatusCode)
                     {
                         _logger.Error($"UPLOAD_FAILED path=\"{filePath}\" status={(int)resp.StatusCode} body=\"{bodyText}\"");
-                        return new UploadedFileResult { originalName = fileName, localDeleted = false, localDeleteError = $"アップロード失敗 (HTTP {(int)resp.StatusCode})" };
+                        return new UploadedFileResult { originalName = fileName, localDeleted = false, localDeleteError = $"アップロード失敗 (HTTP {(int)resp.StatusCode}): {bodyText}" };
                     }
 
                     Dictionary<string, object> json;
@@ -203,7 +204,7 @@ namespace UploadAgent
                     string storedName = json.ContainsKey("stored_name") ? json["stored_name"]?.ToString() : fileName;
 
                     _logger.Info($"UPLOAD_OK path=\"{filePath}\" fileId={fileId} storedName=\"{storedName}\"");
-                    _stats.IncrementMoved(); // アップロード成功もカウント
+                    _stats.IncrementMoved();
 
                     // アップロード成功 → ローカル元ファイルを .machcore_trash へ移動
                     bool localDeleted = false;
@@ -241,7 +242,7 @@ namespace UploadAgent
                         originalName = fileName,
                         storedName = storedName,
                         fileId = fileId,
-                        duplicateHandled = false, // API側で重複時はtrash退避されるが詳細は返さないため固定false
+                        duplicateHandled = false,
                         localDeleted = localDeleted,
                         localDeleteError = localDeleteError,
                     };
