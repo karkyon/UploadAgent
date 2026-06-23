@@ -212,8 +212,15 @@ namespace UploadAgent
 
                 _logger.Info("AGENT_RESTART_REQUESTED");
                 var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                System.Diagnostics.Process.Start(exePath);
-                ExitApp();
+                _trayIcon.Visible = false;
+                _server?.Dispose();
+
+                // 別スレッドで待機してから起動（Mutexのusing解放を待つ）
+                System.Threading.Tasks.Task.Run(() => {
+                    System.Threading.Thread.Sleep(1500);
+                    System.Diagnostics.Process.Start(exePath);
+                });
+                Application.Exit();
             });
             menu.MenuItems.Add(miRestart);
             menu.MenuItems.Add(new MenuItem("-"));
