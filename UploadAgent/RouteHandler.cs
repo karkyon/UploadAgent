@@ -67,7 +67,7 @@ namespace UploadAgent
                 case "/drives" when method == "GET": HandleDrives(ctx); return true;
                 case "/pick-and-upload" when method == "POST": HandlePickAndUpload(ctx, isFolder: false); return true;
                 case "/pick-folder-and-upload" when method == "POST": HandlePickAndUpload(ctx, isFolder: true); return true;
-                    bool isStateChanging = (path == "/move" || path == "/delete" || path == "/pick-and-upload" || path == "/pick-folder-and-upload" || path == "/pg-to-usb");
+                case "/pg-to-usb" when method == "POST": HandlePgToUsb(ctx); return true;
                 default: return false;
             }
         }
