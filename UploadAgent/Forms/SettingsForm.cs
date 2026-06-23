@@ -50,6 +50,9 @@ namespace UploadAgent.Forms
         private Button _btnRefreshTrash;
         private Button _btnClearTrash;
         private ListBox _lbTrashFiles;
+        private TextBox _txtTrashFolder;
+        private Button _btnTrashFolderBrowse;
+        private Button _btnOpenTrashFolder;
 
         public SettingsForm(AppSettings settings, AuditLogger logger,
                             StatsCounter stats, FileOperations fileOps,
@@ -222,21 +225,67 @@ namespace UploadAgent.Forms
             _tab.TabPages.Add(tab);
 
             var pnlTop = new Panel { Dock = DockStyle.Top, Height = 36 };
-            _lblTrashSize    = new Label  { Text = "計算中...", Left = 8, Top = 10, Width = 300, ForeColor = Color.DimGray };
-            _btnRefreshTrash = new Button { Text = "更新",              Left = 320, Top = 5, Width = 80, Height = 26 };
-            _btnClearTrash   = new Button { Text = "一括クリア",        Left = 410, Top = 5, Width = 100, Height = 26,
-                                            BackColor = Color.FromArgb(196, 43, 28), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            _lblTrashSize = new Label { Text = "計算中...", Left = 8, Top = 10, Width = 300, ForeColor = Color.DimGray };
+            _btnRefreshTrash = new Button { Text = "更新", Left = 320, Top = 5, Width = 80, Height = 26 };
+            _btnClearTrash = new Button
+            {
+                Text = "一括クリア",
+                Left = 410,
+                Top = 5,
+                Width = 100,
+                Height = 26,
+                BackColor = Color.FromArgb(196, 43, 28),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
             _btnRefreshTrash.Click += (s, e) => RefreshTrash();
-            _btnClearTrash.Click   += BtnClearTrash_Click;
+            _btnClearTrash.Click += BtnClearTrash_Click;
             pnlTop.Controls.AddRange(new Control[] { _lblTrashSize, _btnRefreshTrash, _btnClearTrash });
             tab.Controls.Add(pnlTop);
 
-            var lbl = new Label { Text = "各ドライブの .machcore_trash フォルダ内ファイル:", Dock = DockStyle.None,
-                                  Left = 8, Top = 42, Width = 500, ForeColor = Color.Gray };
+            var pnlFolder = new Panel { Dock = DockStyle.Top, Height = 36 };
+            var lblFolder = new Label { Text = "格納先フォルダ:", Left = 8, Top = 10, Width = 100, ForeColor = Color.DimGray };
+            _txtTrashFolder = new TextBox { Left = 110, Top = 6, Width = 320 };
+            _btnTrashFolderBrowse = new Button { Text = "参照...", Left = 438, Top = 5, Width = 60, Height = 26 };
+            _btnOpenTrashFolder = new Button { Text = "フォルダを開く", Left = 502, Top = 5, Width = 110, Height = 26 };
+            _btnTrashFolderBrowse.Click += (s, e) =>
+            {
+                using (var dlg = new FolderBrowserDialog { Description = "Trash（ゴミ箱）の格納先フォルダを選択", SelectedPath = _txtTrashFolder.Text })
+                {
+                    if (dlg.ShowDialog() == DialogResult.OK) _txtTrashFolder.Text = dlg.SelectedPath;
+                }
+            };
+            _btnOpenTrashFolder.Click += (s, e) =>
+            {
+                try
+                {
+                    var path = _settings.GetEffectiveTrashRoot();
+                    if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+                    System.Diagnostics.Process.Start("explorer.exe", path);
+                }
+                catch { }
+            };
+            pnlFolder.Controls.AddRange(new Control[] { lblFolder, _txtTrashFolder, _btnTrashFolderBrowse, _btnOpenTrashFolder });
+            tab.Controls.Add(pnlFolder);
+
+            var lbl = new Label
+            {
+                Text = "Trashフォルダ内ファイル（旧バージョンの各ドライブ直下フォルダも含む）:",
+                Dock = DockStyle.None,
+                Left = 8,
+                Top = 78,
+                Width = 600,
+                ForeColor = Color.Gray
+            };
             tab.Controls.Add(lbl);
 
-            _lbTrashFiles = new ListBox { Left = 8, Top = 64, Width = tab.Width - 20, Height = 340,
-                                          Font = new Font("Consolas", 9f),
+            _lbTrashFiles = new ListBox
+            {
+                Left = 8,
+                Top = 100,
+                Width = tab.Width - 20,
+                Height = 300,
+                Font = new Font("Consolas", 9f),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
             tab.Controls.Add(_lbTrashFiles);
@@ -247,12 +296,13 @@ namespace UploadAgent.Forms
         // ════════════════════════════════════════════════════════
         private void LoadValues()
         {
-            _numPort.Value     = _settings.Port;
+            _numPort.Value = _settings.Port;
             _txtServerUrl.Text = _settings.MachCoreServerUrl;
             _chkAutoStart.Checked = _settings.AutoStart;
-            _chkBalloon.Checked   = _settings.ShowBalloonNotify;
-            _chkVerbose.Checked   = _settings.VerboseLog;
-            _txtIconPath.Text     = _settings.CustomIconPath;
+            _chkBalloon.Checked = _settings.ShowBalloonNotify;
+            _chkVerbose.Checked = _settings.VerboseLog;
+            _txtIconPath.Text = _settings.CustomIconPath;
+            _txtTrashFolder.Text = _settings.GetEffectiveTrashRoot();
         }
 
         private void RefreshStats()
@@ -294,17 +344,28 @@ namespace UploadAgent.Forms
 
             try
             {
+                var trashRoot = _settings.GetEffectiveTrashRoot();
+                if (Directory.Exists(trashRoot))
+                {
+                    foreach (var f in Directory.GetFiles(trashRoot, "*", SearchOption.AllDirectories))
+                    {
+                        var fi = new FileInfo(f);
+                        _lbTrashFiles.Items.Add($"[Trash] {fi.Name}  ({FormatBytes(fi.Length)})  {fi.LastWriteTime:yyyy-MM-dd HH:mm}");
+                    }
+                }
+
                 foreach (var d in System.IO.DriveInfo.GetDrives())
                 {
                     if (!d.IsReady) continue;
-                    var trashDir = System.IO.Path.Combine(d.RootDirectory.FullName, ".machcore_trash");
-                    if (!Directory.Exists(trashDir)) continue;
-                    foreach (var f in Directory.GetFiles(trashDir))
+                    var legacyDir = System.IO.Path.Combine(d.RootDirectory.FullName, ".machcore_trash");
+                    if (!Directory.Exists(legacyDir)) continue;
+                    foreach (var f in Directory.GetFiles(legacyDir, "*", SearchOption.AllDirectories))
                     {
-                        var fi   = new FileInfo(f);
-                        _lbTrashFiles.Items.Add($"[{d.Name}] {fi.Name}  ({FormatBytes(fi.Length)})  {fi.LastWriteTime:yyyy-MM-dd HH:mm}");
+                        var fi = new FileInfo(f);
+                        _lbTrashFiles.Items.Add($"[旧:{d.Name}] {fi.Name}  ({FormatBytes(fi.Length)})  {fi.LastWriteTime:yyyy-MM-dd HH:mm}");
                     }
                 }
+
                 if (_lbTrashFiles.Items.Count == 0)
                     _lbTrashFiles.Items.Add("（Trashフォルダは空です）");
             }
@@ -386,12 +447,13 @@ namespace UploadAgent.Forms
                 if (r != DialogResult.Yes) return;
             }
 
-            _settings.Port              = newPort;
+            _settings.Port = newPort;
             _settings.MachCoreServerUrl = _txtServerUrl.Text.Trim();
-            _settings.AutoStart         = _chkAutoStart.Checked;
+            _settings.AutoStart = _chkAutoStart.Checked;
             _settings.ShowBalloonNotify = _chkBalloon.Checked;
-            _settings.VerboseLog        = _chkVerbose.Checked;
-            _settings.CustomIconPath    = _txtIconPath.Text.Trim();
+            _settings.VerboseLog = _chkVerbose.Checked;
+            _settings.CustomIconPath = _txtIconPath.Text.Trim();
+            _settings.TrashFolderPath = _txtTrashFolder.Text.Trim();
             _settings.Save();
 
             _onSaved?.Invoke(_settings);

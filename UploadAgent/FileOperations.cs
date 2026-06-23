@@ -8,15 +8,17 @@ namespace UploadAgent
 {
     public class FileOperations
     {
-        private readonly AuditLogger  _logger;
+        private readonly AppSettings _settings;
+        private readonly AuditLogger _logger;
         private readonly SecurityGuard _guard;
-        private readonly StatsCounter  _stats;
+        private readonly StatsCounter _stats;
 
-        public FileOperations(AuditLogger logger, SecurityGuard guard, StatsCounter stats)
+        public FileOperations(AppSettings settings, AuditLogger logger, SecurityGuard guard, StatsCounter stats)
         {
+            _settings = settings;
             _logger = logger;
-            _guard  = guard;
-            _stats  = stats;
+            _guard = guard;
+            _stats = stats;
         }
 
         // ── ファイル移動 ──────────────────────────────────────────
@@ -44,18 +46,19 @@ namespace UploadAgent
                         continue;
                     }
 
-                    var sourceDir = Path.GetDirectoryName(Path.GetFullPath(path));
-                    var trashDir  = Path.Combine(sourceDir, ".machcore_trash");
+                    var trashDir = _settings.GetEffectiveTrashRoot();
                     EnsureTrashDir(trashDir);
 
+                    var ext = Path.GetExtension(path);
+                    var nameOnly = Path.GetFileNameWithoutExtension(path);
                     var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    var destName  = $"{timestamp}_{Path.GetFileName(path)}";
-                    var destPath  = Path.Combine(trashDir, destName);
+                    var destName = $"{nameOnly}_{timestamp}{ext}";
+                    var destPath = Path.Combine(trashDir, destName);
                     if (File.Exists(destPath))
                     {
                         timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssff");
-                        destName  = $"{timestamp}_{Path.GetFileName(path)}";
-                        destPath  = Path.Combine(trashDir, destName);
+                        destName = $"{nameOnly}_{timestamp}{ext}";
+                        destPath = Path.Combine(trashDir, destName);
                     }
 
                     File.Move(path, destPath);
@@ -85,11 +88,11 @@ namespace UploadAgent
                 {
                     response.drives.Add(new DriveInfo2
                     {
-                        letter   = d.Name.TrimEnd('\\', '/'),
-                        label    = string.IsNullOrEmpty(d.VolumeLabel) ? "(No Label)" : d.VolumeLabel,
-                        type     = "Removable",
-                        free_gb  = Math.Round((double)d.AvailableFreeSpace / (1024 * 1024 * 1024), 1),
-                        total_gb = Math.Round((double)d.TotalSize          / (1024 * 1024 * 1024), 1),
+                        letter = d.Name.TrimEnd('\\', '/'),
+                        label = string.IsNullOrEmpty(d.VolumeLabel) ? "(No Label)" : d.VolumeLabel,
+                        type = "Removable",
+                        free_gb = Math.Round((double)d.AvailableFreeSpace / (1024 * 1024 * 1024), 1),
+                        total_gb = Math.Round((double)d.TotalSize / (1024 * 1024 * 1024), 1),
                     });
                 }
             }
@@ -97,17 +100,26 @@ namespace UploadAgent
             return response;
         }
 
-        // ── Trash サイズ計算（全ドライブの .machcore_trash 合計）────
+        // ── Trash サイズ計算（一元Trashフォルダ + 旧形式の各ドライブ直下フォルダも合算）────
         public long GetTrashSizeBytes()
         {
             long total = 0;
             try
             {
+                var trashRoot = _settings.GetEffectiveTrashRoot();
+                if (Directory.Exists(trashRoot))
+                {
+                    foreach (var f in Directory.GetFiles(trashRoot, "*", SearchOption.AllDirectories))
+                    {
+                        try { total += new FileInfo(f).Length; } catch { }
+                    }
+                }
+
                 foreach (var d in DriveInfo.GetDrives().Where(d => d.IsReady))
                 {
-                    var trashDir = Path.Combine(d.RootDirectory.FullName, ".machcore_trash");
-                    if (!Directory.Exists(trashDir)) continue;
-                    foreach (var f in Directory.GetFiles(trashDir, "*", SearchOption.AllDirectories))
+                    var legacyDir = Path.Combine(d.RootDirectory.FullName, ".machcore_trash");
+                    if (!Directory.Exists(legacyDir)) continue;
+                    foreach (var f in Directory.GetFiles(legacyDir, "*", SearchOption.AllDirectories))
                     {
                         try { total += new FileInfo(f).Length; } catch { }
                     }
@@ -117,18 +129,34 @@ namespace UploadAgent
             return total;
         }
 
-        // ── Trash 一括クリア ──────────────────────────────────────
+        // ── Trash 一括クリア（一元Trashフォルダ + 旧形式フォルダも対象）──────────
         public (int deleted, long freedBytes) ClearTrash()
         {
-            int  deleted    = 0;
+            int deleted = 0;
             long freedBytes = 0;
             try
             {
+                var trashRoot = _settings.GetEffectiveTrashRoot();
+                if (Directory.Exists(trashRoot))
+                {
+                    foreach (var f in Directory.GetFiles(trashRoot, "*", SearchOption.AllDirectories))
+                    {
+                        try
+                        {
+                            var size = new FileInfo(f).Length;
+                            File.Delete(f);
+                            deleted++;
+                            freedBytes += size;
+                        }
+                        catch { }
+                    }
+                }
+
                 foreach (var d in DriveInfo.GetDrives().Where(d => d.IsReady))
                 {
-                    var trashDir = Path.Combine(d.RootDirectory.FullName, ".machcore_trash");
-                    if (!Directory.Exists(trashDir)) continue;
-                    foreach (var f in Directory.GetFiles(trashDir))
+                    var legacyDir = Path.Combine(d.RootDirectory.FullName, ".machcore_trash");
+                    if (!Directory.Exists(legacyDir)) continue;
+                    foreach (var f in Directory.GetFiles(legacyDir, "*", SearchOption.AllDirectories))
                     {
                         try
                         {
@@ -149,8 +177,7 @@ namespace UploadAgent
         private void EnsureTrashDir(string trashDir)
         {
             if (Directory.Exists(trashDir)) return;
-            var di = Directory.CreateDirectory(trashDir);
-            try { di.Attributes |= FileAttributes.Hidden; } catch { }
+            Directory.CreateDirectory(trashDir); // 一元Trashは隠し属性を付けない（Explorerで見える）
         }
     }
 }

@@ -23,8 +23,6 @@ namespace UploadAgent
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
         private readonly System.Windows.Forms.Control _uiThreadMarshal;
 
-        // ── SSL証明書検証バイパス（mkcert自己署名証明書対応）
-        // MachCoreサーバのURLが社内固定IPのため、証明書検証をスキップしても安全
         private static readonly HttpClientHandler _sslBypassHandler = new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true,
@@ -38,18 +36,13 @@ namespace UploadAgent
             _uiThreadMarshal = uiThreadMarshal;
         }
 
-        // ── ダイアログ用オーナーウィンドウ（最前面表示を保証）────────────
-        // _uiThreadMarshal（非表示Form）をオーナーとして渡すことで
-        // OpenFileDialog/FolderBrowserDialog が確実に最前面に表示される
         private IWin32Window GetOwner() => _uiThreadMarshal;
 
-        // ── 単体ファイル選択→アップロード ──────────────────────────
         public PickUploadResponse PickFileAndUpload(string ticket)
         {
             string[] paths = null;
             _uiThreadMarshal.Invoke(new Action(() =>
             {
-                // オーナーを渡して最前面表示を保証
                 using (var dlg = new OpenFileDialog())
                 {
                     dlg.Title = "MachCore - アップロードするファイルを選択";
@@ -69,7 +62,6 @@ namespace UploadAgent
             return UploadFiles(ticket, paths);
         }
 
-        // ── フォルダ選択→グリッドで選択させる→選択分だけアップロード ────────
         public PickUploadResponse PickFolderAndUpload(string ticket)
         {
             string folderPath = null;
@@ -109,7 +101,6 @@ namespace UploadAgent
             {
                 using (var picker = new Forms.FileGridPickerForm(folderPath, allFiles))
                 {
-                    // グリッドピッカー自体もオーナー付きで最前面表示
                     picker.ShowDialog(GetOwner());
                     gridCancelled = picker.WasCancelled;
                     if (!gridCancelled) selectedFiles = picker.SelectedFiles.ToArray();
@@ -161,7 +152,6 @@ namespace UploadAgent
             var fileName = Path.GetFileName(filePath);
             _logger.Info($"UPLOAD_START path=\"{filePath}\"");
 
-            // SSL証明書バイパスハンドラを使ってHttpClientを生成
             using (var client = new HttpClient(_sslBypassHandler, disposeHandler: false))
             {
                 client.Timeout = TimeSpan.FromMinutes(5);
@@ -172,7 +162,6 @@ namespace UploadAgent
                 using (var streamContent = new StreamContent(fileStream))
                 {
                     streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-                    // ticketをfileより先に追加（multipartフィールド順序の保険）
                     content.Add(new StringContent(ticket), "ticket");
                     content.Add(streamContent, "file", fileName);
 
@@ -206,25 +195,24 @@ namespace UploadAgent
                     _logger.Info($"UPLOAD_OK path=\"{filePath}\" fileId={fileId} storedName=\"{storedName}\"");
                     _stats.IncrementMoved();
 
-                    // アップロード成功 → ローカル元ファイルを .machcore_trash へ移動
+                    // アップロード成功 → ローカル元ファイルを設定のTrashフォルダ（一元・設定可能）へ移動
                     bool localDeleted = false;
                     string localDeleteError = null;
                     try
                     {
-                        var sourceDir = Path.GetDirectoryName(Path.GetFullPath(filePath));
-                        var trashDir = Path.Combine(sourceDir, ".machcore_trash");
-                        if (!Directory.Exists(trashDir))
-                        {
-                            var di = Directory.CreateDirectory(trashDir);
-                            try { di.Attributes |= FileAttributes.Hidden; } catch { }
-                        }
+                        var trashDir = _settings.GetEffectiveTrashRoot();
+                        if (!Directory.Exists(trashDir)) Directory.CreateDirectory(trashDir);
+
+                        var ext = Path.GetExtension(fileName);
+                        var nameOnly = Path.GetFileNameWithoutExtension(fileName);
                         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                        var destName = $"{timestamp}_{fileName}";
+                        // 命名規則: 元のファイル名_yyyymmdd_hhMMss.拡張子
+                        var destName = $"{nameOnly}_{timestamp}{ext}";
                         var destPath = Path.Combine(trashDir, destName);
                         if (File.Exists(destPath))
                         {
                             timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssff");
-                            destName = $"{timestamp}_{fileName}";
+                            destName = $"{nameOnly}_{timestamp}{ext}";
                             destPath = Path.Combine(trashDir, destName);
                         }
                         File.Move(filePath, destPath);
