@@ -9,6 +9,7 @@ namespace UploadAgent.Models
     public class PickUploadRequest
     {
         public string ticket { get; set; }
+        public string fileType { get; set; }   // ★追加: PHOTO / DRAWING（表示用ヒント。認可はticketで行う）
     }
 
     public class UploadedFileResult

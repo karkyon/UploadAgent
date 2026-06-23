@@ -38,14 +38,16 @@ namespace UploadAgent
 
         private IWin32Window GetOwner() => _uiThreadMarshal;
 
-        public PickUploadResponse PickFileAndUpload(string ticket)
+        public PickUploadResponse PickFileAndUpload(string ticket, string fileType = null)
         {
             string[] paths = null;
             _uiThreadMarshal.Invoke(new Action(() =>
             {
                 using (var dlg = new OpenFileDialog())
                 {
-                    dlg.Title = "MachCore - アップロードするファイルを選択";
+                    dlg.Title = fileType == "PHOTO" ? "MachCore - 📷 写真ファイルを選択"
+                              : fileType == "DRAWING" ? "MachCore - 📐 図ファイルを選択"
+                              : "MachCore - アップロードするファイルを選択";
                     dlg.Multiselect = false;
                     dlg.Filter = "すべてのファイル (*.*)|*.*";
                     var result = dlg.ShowDialog(GetOwner());
@@ -62,14 +64,16 @@ namespace UploadAgent
             return UploadFiles(ticket, paths);
         }
 
-        public PickUploadResponse PickFolderAndUpload(string ticket)
+        public PickUploadResponse PickFolderAndUpload(string ticket, string fileType = null)
         {
             string folderPath = null;
             _uiThreadMarshal.Invoke(new Action(() =>
             {
                 using (var dlg = new FolderBrowserDialog())
                 {
-                    dlg.Description = "MachCore - アップロードするフォルダを選択";
+                    dlg.Description = fileType == "PHOTO" ? "MachCore - 写真ファイルが入っているフォルダを選択"
+                                     : fileType == "DRAWING" ? "MachCore - 図ファイルが入っているフォルダを選択"
+                                     : "MachCore - アップロードするフォルダを選択";
                     var result = dlg.ShowDialog(GetOwner());
                     if (result == DialogResult.OK) folderPath = dlg.SelectedPath;
                 }
@@ -99,7 +103,7 @@ namespace UploadAgent
             bool gridCancelled = true;
             _uiThreadMarshal.Invoke(new Action(() =>
             {
-                using (var picker = new Forms.FileGridPickerForm(folderPath, allFiles))
+                using (var picker = new Forms.FileGridPickerForm(folderPath, allFiles, fileType))
                 {
                     picker.ShowDialog(GetOwner());
                     gridCancelled = picker.WasCancelled;

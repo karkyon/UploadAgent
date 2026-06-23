@@ -36,7 +36,7 @@ namespace UploadAgent.Forms
 
         private const int ThumbW = 220, ThumbH = 160;
         private const int CardW = 236, CardH = 236;
-        private const int Cols = 6;
+        private const int Cols = 4;
 
         private readonly List<string> _allFiles;
         private readonly Dictionary<string, WebCheckBox> _checkBoxes = new Dictionary<string, WebCheckBox>();
@@ -55,17 +55,20 @@ namespace UploadAgent.Forms
         private static readonly HashSet<string> ImageExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp" };
 
-        public FileGridPickerForm(string folderPath, IEnumerable<string> files)
+        public FileGridPickerForm(string folderPath, IEnumerable<string> files, string fileType = null)
         {
             _allFiles = files.ToList();
-            InitializeComponent(folderPath);
+            InitializeComponent(folderPath, fileType);
             LoadThumbnails();
         }
 
-        private void InitializeComponent(string folderPath)
+        private void InitializeComponent(string folderPath, string fileType)
         {
             int width = Cols * (CardW + 14) + 60;
-            this.Text = "MachCore - 取り込むファイルを選択";
+            string opLabel = fileType == "PHOTO" ? "📷 写真ファイル取込"
+                            : fileType == "DRAWING" ? "📐 図ファイル取込"
+                            : "📁 ファイル取込";
+            this.Text = $"MachCore - {opLabel} - 取り込むファイルを選択";
             this.Size = new Size(Math.Max(width, 900), 760);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.TopMost = true;
@@ -83,7 +86,7 @@ namespace UploadAgent.Forms
 
             _lblTitle = new Label
             {
-                Text = $"📁 {Path.GetFileName(folderPath)}",
+                Text = $"{opLabel} ／ {Path.GetFileName(folderPath)}",
                 AutoSize = true,
                 Top = 16,
                 Left = 24,
@@ -99,10 +102,11 @@ namespace UploadAgent.Forms
                 Font = new Font("Yu Gothic UI", 9f),
                 ForeColor = ColorSlate400,
             };
-            _btnSelectAll = new RoundButton("すべて選択", 104, 34, Color.White, ColorSlate700, ColorSlate300, ColorTeal50);
-            _btnSelectAll.Top = 19; _btnSelectAll.Left = 300;
-            _btnSelectNone = new RoundButton("すべて解除", 104, 34, Color.White, ColorSlate700, ColorSlate300, ColorSlate50);
-            _btnSelectNone.Top = 19; _btnSelectNone.Left = 412;
+            // ★変更: 「すべて選択」=teal系（選択・前向き） / 「すべて解除」=slate系（中立・リセット）
+            _btnSelectAll = new RoundButton("すべて選択", 104, 34, ColorTeal50, ColorTeal700, ColorTeal100, ColorTeal100);
+            _btnSelectAll.Top = 19;
+            _btnSelectNone = new RoundButton("すべて解除", 104, 34, ColorSlate100, ColorSlate600, ColorSlate300, ColorSlate200);
+            _btnSelectNone.Top = 19;
             _btnSelectAll.Click += (s, e) => SetAllChecked(true);
             _btnSelectNone.Click += (s, e) => SetAllChecked(false);
 
@@ -142,16 +146,25 @@ namespace UploadAgent.Forms
             this.Controls.Add(bottomPanel);
             this.Controls.Add(headerPanel);
 
-            this.Resize += (s, e) => PositionBottomButtons(bottomPanel);
-            this.Shown += (s, e) => PositionBottomButtons(bottomPanel);
+            // ★変更: ヘッダーボタンもリサイズに追従して右端寄せ
+            this.Resize += (s, e) => { PositionBottomButtons(bottomPanel); PositionHeaderButtons(headerPanel); };
+            this.Shown += (s, e) => { PositionBottomButtons(bottomPanel); PositionHeaderButtons(headerPanel); };
 
             BuildGrid();
         }
 
+        // フッターの「取り込む」「キャンセル」を右端寄せ配置
         private void PositionBottomButtons(Panel bottomPanel)
         {
             _btnOk.Left = bottomPanel.Width - _btnOk.Width - _btnCancel.Width - 36;
             _btnCancel.Left = bottomPanel.Width - _btnCancel.Width - 24;
+        }
+
+        // ヘッダーの「すべて選択」「すべて解除」を右端寄せ配置
+        private void PositionHeaderButtons(Panel headerPanel)
+        {
+            _btnSelectNone.Left = headerPanel.Width - _btnSelectNone.Width - 24;
+            _btnSelectAll.Left = _btnSelectNone.Left - _btnSelectAll.Width - 12;
         }
 
         private void BuildGrid()

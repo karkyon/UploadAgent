@@ -155,8 +155,8 @@ namespace UploadAgent
             _logger.Info($"PICK_AND_UPLOAD_REQUEST isFolder={isFolder}");
 
             var result = isFolder
-                ? _uploadCoordinator.PickFolderAndUpload(pickReq.ticket)
-                : _uploadCoordinator.PickFileAndUpload(pickReq.ticket);
+                ? _uploadCoordinator.PickFolderAndUpload(pickReq.ticket, pickReq.fileType)
+                : _uploadCoordinator.PickFileAndUpload(pickReq.ticket, pickReq.fileType);
 
             SendJson(ctx, 200, result);
         }
