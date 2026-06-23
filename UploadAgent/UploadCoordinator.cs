@@ -38,6 +38,23 @@ namespace UploadAgent
 
         private IWin32Window GetOwner() => _uiThreadMarshal;
 
+        // ★追加: 拡張子からMIMEタイプを判定する。サーバ側のisImage判定等が正しく動くようにする
+        private static string GetMimeType(string fileName)
+        {
+            var ext = Path.GetExtension(fileName).ToLowerInvariant();
+            switch (ext)
+            {
+                case ".jpg":
+                case ".jpeg": return "image/jpeg";
+                case ".png": return "image/png";
+                case ".tif":
+                case ".tiff": return "image/tiff";
+                case ".pdf": return "application/pdf";
+                case ".txt": return "text/plain";
+                default: return "application/octet-stream";
+            }
+        }
+
         public PickUploadResponse PickFileAndUpload(string ticket, string fileType = null)
         {
             string[] paths = null;
@@ -60,7 +77,6 @@ namespace UploadAgent
                     else if (fileType == "PROGRAM")
                     {
                         dlg.Title = "MachCore - 📄 プログラムファイルを選択";
-                        // PGメインファイルは拡張子なしが正規パターンのため、既定は「すべてのファイル」
                         dlg.Filter = "プログラムファイル (*.min;*.spf;*.mpf;*.nc;*.cnc;*.tap;*.prg;*.gcode;*.g;*.txt)|*.min;*.spf;*.mpf;*.nc;*.cnc;*.tap;*.prg;*.gcode;*.g;*.txt|すべてのファイル (*.*)|*.*";
                         dlg.FilterIndex = 2;
                     }
@@ -154,7 +170,6 @@ namespace UploadAgent
             return UploadFiles(ticket, selectedFiles);
         }
 
-        // fileTypeに応じてファイル一覧を絞り込む
         private static string[] FilterFilesByType(string[] files, string fileType)
         {
             if (fileType == "PHOTO")
@@ -170,14 +185,13 @@ namespace UploadAgent
             if (fileType == "PROGRAM")
             {
                 var exts = new HashSet<string> { ".min", ".spf", ".mpf", ".nc", ".cnc", ".tap", ".prg", ".gcode", ".g", ".txt" };
-                // PGメインファイルは拡張子なしが正規パターンのため、拡張子なしファイルも許容
                 return files.Where(f =>
                 {
                     var e = Path.GetExtension(f);
                     return e == "" || exts.Contains(e.ToLowerInvariant());
                 }).ToArray();
             }
-            return files; // fileType不明時は全件（後方互換）
+            return files;
         }
 
         private PickUploadResponse UploadFiles(string ticket, string[] paths)
@@ -224,7 +238,8 @@ namespace UploadAgent
                 using (var fileStream = File.OpenRead(filePath))
                 using (var streamContent = new StreamContent(fileStream))
                 {
-                    streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    // ★修正: 拡張子から正しいMIMEタイプを設定（以前は常にapplication/octet-stream固定 → サーバ側のisImage判定が壊れていた）
+                    streamContent.Headers.ContentType = new MediaTypeHeaderValue(GetMimeType(fileName));
                     content.Add(new StringContent(ticket), "ticket");
                     content.Add(streamContent, "file", fileName);
 
@@ -258,7 +273,6 @@ namespace UploadAgent
                     _logger.Info($"UPLOAD_OK path=\"{filePath}\" fileId={fileId} storedName=\"{storedName}\"");
                     _stats.IncrementMoved();
 
-                    // アップロード成功 → ローカル元ファイルを設定のTrashフォルダ（一元・設定可能）へ移動
                     bool localDeleted = false;
                     string localDeleteError = null;
                     try
@@ -269,7 +283,6 @@ namespace UploadAgent
                         var ext = Path.GetExtension(fileName);
                         var nameOnly = Path.GetFileNameWithoutExtension(fileName);
                         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                        // 命名規則: 元のファイル名_yyyymmdd_hhMMss.拡張子
                         var destName = $"{nameOnly}_{timestamp}{ext}";
                         var destPath = Path.Combine(trashDir, destName);
                         if (File.Exists(destPath))
