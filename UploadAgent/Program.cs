@@ -50,8 +50,8 @@ namespace UploadAgent
 
                 // 設定・ロガー初期化
                 _settings = AppSettings.Load();
-                MessageBox.Show($"読み込んだポート: {_settings.Port}\n読み込んだパス: {AppSettings.GetSettingsPathForDebug()}", "DEBUG");
-                _logger   = new AuditLogger { VerboseEnabled = _settings.VerboseLog };
+                // MessageBox.Show($"読み込んだポート: {_settings.Port}\n読み込んだパス: {AppSettings.GetSettingsPathForDebug()}", "DEBUG");
+                _logger = new AuditLogger { VerboseEnabled = _settings.VerboseLog };
                 _stats    = new StatsCounter();
 
                 // トークン生成・依存オブジェクト構築
@@ -200,6 +200,22 @@ namespace UploadAgent
             var miStats = new MenuItem("📊 統計情報を表示", (s, e) => ShowStatsDialog());
             menu.MenuItems.Add(miStats);
 
+            menu.MenuItems.Add(new MenuItem("-"));
+
+            // ── 再起動
+            var miRestart = new MenuItem("🔄 再起動", (s, e) =>
+            {
+                var ans = MessageBox.Show(
+                    "UploadAgentを再起動しますか？\n（一時的に接続が切れます）",
+                    APP_NAME, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (ans != DialogResult.Yes) return;
+
+                _logger.Info("AGENT_RESTART_REQUESTED");
+                var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                System.Diagnostics.Process.Start(exePath);
+                ExitApp();
+            });
+            menu.MenuItems.Add(miRestart);
             menu.MenuItems.Add(new MenuItem("-"));
 
             // ── 終了

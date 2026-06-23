@@ -26,7 +26,7 @@ namespace UploadAgent
             "MachCore", "UploadAgent", "appsettings.json"
         );
 
-        public static string GetSettingsPathForDebug() => _settingsPath;
+        // public static string GetSettingsPathForDebug() => _settingsPath;
 
         public static AppSettings Load()
         {
