@@ -396,8 +396,6 @@ namespace UploadAgent.Forms
         {
             var g = pevent.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            // 親の背景色でまずクリア（Region外にはみ出さないが、念のため）
             g.Clear(this.Parent != null ? this.Parent.BackColor : Color.White);
 
             var rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
@@ -481,7 +479,7 @@ namespace UploadAgent.Forms
             int boxTop = (this.Height - boxSize) / 2;
             var boxRect = new Rectangle(0, boxTop, boxSize, boxSize);
 
-            using (var path = RoundedRect(boxRect, 4))
+            using (var path = RoundedRect(boxRect, 5)) // ★変更: 角丸を強調(4→5)
             {
                 if (this.Checked)
                 {
@@ -490,9 +488,10 @@ namespace UploadAgent.Forms
                 }
                 else
                 {
+                    // ★変更: 未選択時の枠線を視認性の高い濃色・太めに変更
                     using (var brush = new SolidBrush(Color.White))
                         g.FillPath(brush, path);
-                    using (var pen = new Pen(ColorSlate300, 1.5f))
+                    using (var pen = new Pen(ColorSlate700, 2.2f))
                         g.DrawPath(pen, path);
                 }
             }
