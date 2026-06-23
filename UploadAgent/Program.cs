@@ -35,6 +35,13 @@ namespace UploadAgent
         [STAThread]
         static void Main()
         {
+            // 再起動モード: 前プロセスのMutex解放を待つ
+            if (Environment.GetCommandLineArgs().Length > 1 &&
+                Environment.GetCommandLineArgs()[1] == "--restart")
+            {
+                System.Threading.Thread.Sleep(2000);
+            }
+
             bool isNew;
             using (new Mutex(true, "MachCoreUploadAgent_SingleInstance", out isNew))
             {
@@ -214,14 +221,11 @@ namespace UploadAgent
                 var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 _trayIcon.Visible = false;
                 _server?.Dispose();
-
-                // 別スレッドで待機してから起動（Mutexのusing解放を待つ）
-                System.Threading.Tasks.Task.Run(() => {
-                    System.Threading.Thread.Sleep(1500);
-                    System.Diagnostics.Process.Start(exePath);
-                });
+                // --restart引数付きで即起動（新プロセス側で2秒待ってからMutex取得）
+                System.Diagnostics.Process.Start(exePath, "--restart");
                 Application.Exit();
             });
+
             menu.MenuItems.Add(miRestart);
             menu.MenuItems.Add(new MenuItem("-"));
 

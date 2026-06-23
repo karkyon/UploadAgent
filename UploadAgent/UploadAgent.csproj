@@ -34,6 +34,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <StartupObject>UploadAgent.Program</StartupObject>
+    <ApplicationIcon>UploadAgent.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />

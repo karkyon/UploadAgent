@@ -13,7 +13,7 @@ namespace UploadAgent
     public class AppSettings
     {
         // ── デフォルト値 ─────────────────────────────────────────
-        public int    Port               { get; set; } = 57300;
+        public int    Port               { get; set; } = 57301;
         public string MachCoreServerUrl  { get; set; } = "https://192.168.1.11:8443";
         public bool   AutoStart          { get; set; } = true;
         public bool   ShowBalloonNotify  { get; set; } = true;
