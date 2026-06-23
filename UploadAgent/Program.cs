@@ -64,7 +64,7 @@ namespace UploadAgent
                 // トークン生成・依存オブジェクト構築
                 _token   = Guid.NewGuid().ToString();
                 _guard   = new SecurityGuard(_token);
-                _fileOps = new FileOperations(_logger, _guard, _stats);
+                _fileOps = new FileOperations(_settings, _logger, _guard, _stats);
                 _hiddenUiForm = new Form { ShowInTaskbar = false, WindowState = FormWindowState.Minimized, Opacity = 0 };
                 var _ = _hiddenUiForm.Handle; // ハンドル生成（Invoke利用のため）
                 _uploadCoordinator = new UploadCoordinator(_settings, _logger, _stats, _hiddenUiForm);
