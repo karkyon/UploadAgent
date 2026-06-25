@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Security;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
@@ -38,6 +39,23 @@ namespace UploadAgent
 
         private IWin32Window GetOwner() => _uiThreadMarshal;
 
+        // ★追加: ダイアログをブラウザ等の他ウィンドウより確実に最前面へ出すためのWin32 API
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        private const int SW_RESTORE = 9;
+
         // ★追加: 拡張子からMIMEタイプを判定する。サーバ側のisImage判定等が正しく動くようにする
         private static string GetMimeType(string fileName)
         {
@@ -53,6 +71,45 @@ namespace UploadAgent
                 case ".txt": return "text/plain";
                 default: return "application/octet-stream";
             }
+        }
+
+        // ★追加: ダイアログ表示前にメインウィンドウを確実にフォアグラウンド化する。
+        //   SetForegroundWindowだけではOSのフォーカス窃取防止機構によって無視されることがあるため、
+        //   現在フォアグラウンドにあるウィンドウ(ブラウザ等)のスレッドにAttachThreadInputで一時結合し、
+        //   その上でフォアグラウンド化することで確実性を高める。
+        private void ForceForeground(IntPtr handle)
+        {
+            try
+            {
+                ShowWindow(handle, SW_RESTORE);
+
+                IntPtr fgWindow = GetForegroundWindow();
+                uint fgThread = GetWindowThreadProcessId(fgWindow, out _);
+                uint thisThread = GetCurrentThreadId();
+
+                if (fgThread != thisThread)
+                {
+                    AttachThreadInput(fgThread, thisThread, true);
+                    SetForegroundWindow(handle);
+                    BringWindowToTop(handle);
+                    AttachThreadInput(fgThread, thisThread, false);
+                }
+                else
+                {
+                    SetForegroundWindow(handle);
+                    BringWindowToTop(handle);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"DIALOG_FOREGROUND_FAILED err=\"{ex.Message}\"");
+            }
+        }
+
+        private DialogResult ShowDialogOnTop(CommonDialog dlg)
+        {
+            ForceForeground(_uiThreadMarshal.Handle);
+            return dlg.ShowDialog(GetOwner());
         }
 
         public PickUploadResponse PickFileAndUpload(string ticket, string fileType = null)
@@ -86,7 +143,7 @@ namespace UploadAgent
                         dlg.Filter = "すべてのファイル (*.*)|*.*";
                     }
                     dlg.Multiselect = false;
-                    var result = dlg.ShowDialog(GetOwner());
+                    var result = ShowDialogOnTop(dlg);
                     if (result == DialogResult.OK) paths = new[] { dlg.FileName };
                 }
             }));
@@ -97,7 +154,7 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = true, success = false };
             }
 
-            return UploadFiles(ticket, paths);
+            return UploadFiles(ticket, paths, null, null);
         }
 
         public PickUploadResponse PickFolderAndUpload(string ticket, string fileType = null)
@@ -111,7 +168,7 @@ namespace UploadAgent
                                      : fileType == "DRAWING" ? "MachCore - 📐 図ファイルが入っているフォルダを選択"
                                      : fileType == "PROGRAM" ? "MachCore - 📄 プログラムファイルが入っているフォルダを選択"
                                      : "MachCore - アップロードするフォルダを選択";
-                    var result = dlg.ShowDialog(GetOwner());
+                    var result = ShowDialogOnTop(dlg);
                     if (result == DialogResult.OK) folderPath = dlg.SelectedPath;
                 }
             }));
@@ -121,6 +178,11 @@ namespace UploadAgent
                 _logger.Info("PICK_UPLOAD_CANCELLED (folder)");
                 return new PickUploadResponse { cancelled = true, success = false };
             }
+
+            // ★選択したフォルダの「元のフォルダ名」(例: "1846.WPD")を保持する。
+            //   これをアップロード時にAPIへ送信し、加工IDフォルダの中にこの名前のサブフォルダとして
+            //   そのまま保存させる。(加工ID/元フォルダ名/ファイル名 という階層を維持するため)
+            string originalFolderName = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
             string[] allFiles;
             try
@@ -148,12 +210,26 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = false, success = false, error = $"フォルダ内に{typeLabel}ファイルが見つかりません（全{totalCount}件中0件）" };
             }
 
+            // ★PROGRAM（プログラムファイル）の場合: フォルダ単位を選んだ時点で
+            //   「フォルダ内の全ファイルをそのままアップロードする」という仕様であり、
+            //   1ファイルずつ選別させるグリッド選択UI(FileGridPickerForm)は不要かつ不適切。
+            //   写真・図（PHOTO/DRAWING）は複数枚から選んで取り込む運用のためグリッド選択を維持するが、
+            //   PROGRAMはここで確認UIを完全にスキップし、フィルタ済み全ファイルを直接アップロードする。
+            if (fileType == "PROGRAM")
+            {
+                _logger.Info($"PROGRAM_FOLDER_DIRECT_UPLOAD count={allFiles.Length} / total={totalCount} folder=\"{folderPath}\" originalFolderName=\"{originalFolderName}\"");
+                // ★フォルダ単位アップロード時は、個別ファイルのTrash移動ではなく
+                //   全ファイルのアップロードが成功した後にフォルダ全体をTrashへ移動する。
+                return UploadFiles(ticket, allFiles, originalFolderName, folderPath);
+            }
+
             string[] selectedFiles = null;
             bool gridCancelled = true;
             _uiThreadMarshal.Invoke(new Action(() =>
             {
                 using (var picker = new Forms.FileGridPickerForm(folderPath, allFiles, fileType))
                 {
+                    ForceForeground(_uiThreadMarshal.Handle);
                     picker.ShowDialog(GetOwner());
                     gridCancelled = picker.WasCancelled;
                     if (!gridCancelled) selectedFiles = picker.SelectedFiles.ToArray();
@@ -167,7 +243,8 @@ namespace UploadAgent
             }
 
             _logger.Info($"FOLDER_GRID_SELECTED count={selectedFiles.Length} / filtered={allFiles.Length} / total={totalCount}");
-            return UploadFiles(ticket, selectedFiles);
+            // PHOTO/DRAWINGはグリッドで一部だけ選んだ可能性があるため、フォルダ全体の削除はしない(個別ファイルのみTrash移動)
+            return UploadFiles(ticket, selectedFiles, originalFolderName, null);
         }
 
         private static string[] FilterFilesByType(string[] files, string fileType)
@@ -313,15 +390,22 @@ namespace UploadAgent
             }
         }
 
-        private PickUploadResponse UploadFiles(string ticket, string[] paths)
+        // ★変更: folderName/sourceFolderPath引数を追加。
+        //   sourceFolderPathが指定されている場合(=フォルダ単位アップロード)、
+        //   全ファイルのアップロードが成功した後にフォルダ全体をTrashへ移動する。
+        //   指定がない場合(=単体ファイル、または写真/図のグリッド選択)は、
+        //   従来通り各ファイルを個別にTrashへ移動する。
+        private PickUploadResponse UploadFiles(string ticket, string[] paths, string folderName, string sourceFolderPath)
         {
             var response = new PickUploadResponse { cancelled = false };
+            bool moveWholeFolder = !string.IsNullOrEmpty(sourceFolderPath);
 
             foreach (var path in paths)
             {
                 try
                 {
-                    var fileResult = UploadSingleFile(ticket, path);
+                    // フォルダ全体を後でまとめて移動する場合は、個別ファイルのTrash移動はスキップする
+                    var fileResult = UploadSingleFile(ticket, path, folderName, skipLocalTrash: moveWholeFolder);
                     response.files.Add(fileResult);
                 }
                 catch (Exception ex)
@@ -340,13 +424,55 @@ namespace UploadAgent
             if (!response.success && string.IsNullOrEmpty(response.error))
                 response.error = "一部または全部のファイルのアップロードに失敗しました";
 
+            // ★全ファイルのアップロードが成功し、フォルダ全体移動が指定されている場合のみ、
+            //   フォルダごとTrashへ移動する。1件でも失敗していればフォルダは残し、再試行できるようにする。
+            if (moveWholeFolder && response.success)
+            {
+                try
+                {
+                    var trashDir = _settings.GetEffectiveTrashRoot();
+                    if (!Directory.Exists(trashDir)) Directory.CreateDirectory(trashDir);
+
+                    var folderBaseName = Path.GetFileName(sourceFolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    var destFolderName = $"{folderBaseName}_{timestamp}";
+                    var destFolderPath = Path.Combine(trashDir, destFolderName);
+                    if (Directory.Exists(destFolderPath))
+                    {
+                        timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssff");
+                        destFolderName = $"{folderBaseName}_{timestamp}";
+                        destFolderPath = Path.Combine(trashDir, destFolderName);
+                    }
+
+                    Directory.Move(sourceFolderPath, destFolderPath);
+                    _logger.Info($"LOCAL_TRASH_FOLDER_OK src=\"{sourceFolderPath}\" dst=\"{destFolderPath}\"");
+
+                    // 各ファイル結果のlocalDeletedフラグも更新しておく(UI表示の整合性のため)
+                    foreach (var f in response.files)
+                    {
+                        f.localDeleted = true;
+                        f.localDeleteError = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn($"LOCAL_TRASH_FOLDER_FAILED path=\"{sourceFolderPath}\" err=\"{ex.Message}\"");
+                    foreach (var f in response.files)
+                    {
+                        if (string.IsNullOrEmpty(f.localDeleteError))
+                            f.localDeleteError = $"フォルダ移動失敗: {ex.Message}";
+                    }
+                }
+            }
+
             return response;
         }
 
-        private UploadedFileResult UploadSingleFile(string ticket, string filePath)
+        // ★変更: folderName/skipLocalTrash引数を追加。
+        private UploadedFileResult UploadSingleFile(string ticket, string filePath, string folderName, bool skipLocalTrash = false)
         {
             var fileName = Path.GetFileName(filePath);
-            _logger.Info($"UPLOAD_START path=\"{filePath}\"");
+            _logger.Info($"UPLOAD_START path=\"{filePath}\" folderName=\"{folderName}\"");
 
             using (var client = new HttpClient(_sslBypassHandler, disposeHandler: false))
             {
@@ -361,6 +487,10 @@ namespace UploadAgent
                     streamContent.Headers.ContentType = new MediaTypeHeaderValue(GetMimeType(fileName));
                     content.Add(new StringContent(ticket), "ticket");
                     content.Add(streamContent, "file", fileName);
+                    if (!string.IsNullOrEmpty(folderName))
+                    {
+                        content.Add(new StringContent(folderName), "folder_name");
+                    }
 
                     HttpResponseMessage resp;
                     try
@@ -391,6 +521,21 @@ namespace UploadAgent
 
                     _logger.Info($"UPLOAD_OK path=\"{filePath}\" fileId={fileId} storedName=\"{storedName}\"");
                     _stats.IncrementMoved();
+
+                    // ★フォルダ単位アップロードでフォルダ全体を後でまとめて移動する場合は、
+                    //   個別ファイルのTrash移動をスキップする(呼び出し元のUploadFilesで一括処理)。
+                    if (skipLocalTrash)
+                    {
+                        return new UploadedFileResult
+                        {
+                            originalName = fileName,
+                            storedName = storedName,
+                            fileId = fileId,
+                            duplicateHandled = false,
+                            localDeleted = false, // フォルダ移動成功後にUploadFiles側でtrueに更新される
+                            localDeleteError = null,
+                        };
+                    }
 
                     bool localDeleted = false;
                     string localDeleteError = null;
