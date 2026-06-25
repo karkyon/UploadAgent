@@ -9,7 +9,7 @@ namespace UploadAgent.Models
     public class PickUploadRequest
     {
         public string ticket { get; set; }
-        public string fileType { get; set; }   // ★追加: PHOTO / DRAWING（表示用ヒント。認可はticketで行う）
+        public string fileType { get; set; }
     }
 
     public class UploadedFileResult
@@ -21,6 +21,10 @@ namespace UploadAgent.Models
         public string duplicateMovedTo { get; set; }
         public bool localDeleted { get; set; }
         public string localDeleteError { get; set; }
+        public string debugSourcePath { get; set; }
+        public string debugFolderNameSent { get; set; }
+        public string debugServerRawResponse { get; set; }
+        public int debugServerStatusCode { get; set; }
     }
 
     public class PickUploadResponse
@@ -29,6 +33,13 @@ namespace UploadAgent.Models
         public bool success { get; set; }
         public List<UploadedFileResult> files { get; set; } = new List<UploadedFileResult>();
         public string error { get; set; }
+        public string debugSelectedFolderPath { get; set; }
+        public string debugOriginalFolderName { get; set; }
+        public List<string> debugAllFilesFound { get; set; } = new List<string>();
+        public List<string> debugFilteredFiles { get; set; } = new List<string>();
+        public bool debugAttemptedWholeFolderMove { get; set; }
+        public string debugWholeFolderMoveDestPath { get; set; }
+        public string debugWholeFolderMoveError { get; set; }
     }
 }
 
