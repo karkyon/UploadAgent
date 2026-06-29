@@ -10,6 +10,9 @@ namespace UploadAgent.Models
     {
         public string ticket { get; set; }
         public string fileType { get; set; }
+        // MC/NC両対応: 未指定時はMC側の既定URL(/api/mc/files/upload-by-ticket)にフォールバックする。
+        // NC側からの呼び出し時のみ "/api/nc/files/upload-by-ticket" 等を指定する。
+        public string uploadPath { get; set; }
     }
 
     public class UploadedFileResult

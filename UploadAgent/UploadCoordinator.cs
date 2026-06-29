@@ -112,7 +112,10 @@ namespace UploadAgent
             return dlg.ShowDialog(GetOwner());
         }
 
-        public PickUploadResponse PickFileAndUpload(string ticket, string fileType = null)
+        // MC側の既定アップロードURL(後方互換のデフォルト値)。MC運用は今まで通りこのURLを使う。
+        private const string DEFAULT_MC_UPLOAD_PATH = "/api/mc/files/upload-by-ticket";
+
+        public PickUploadResponse PickFileAndUpload(string ticket, string fileType = null, string uploadPath = null)
         {
             string[] paths = null;
             _uiThreadMarshal.Invoke(new Action(() =>
@@ -154,10 +157,10 @@ namespace UploadAgent
                 return new PickUploadResponse { cancelled = true, success = false };
             }
 
-            return UploadFiles(ticket, paths, null, null);
+            return UploadFiles(ticket, paths, null, null, uploadPath);
         }
 
-        public PickUploadResponse PickFolderAndUpload(string ticket, string fileType = null)
+        public PickUploadResponse PickFolderAndUpload(string ticket, string fileType = null, string uploadPath = null)
         {
             string folderPath = null;
             _uiThreadMarshal.Invoke(new Action(() =>
@@ -220,7 +223,7 @@ namespace UploadAgent
                 _logger.Info($"PROGRAM_FOLDER_DIRECT_UPLOAD count={allFiles.Length} / total={totalCount} folder=\"{folderPath}\" originalFolderName=\"{originalFolderName}\"");
                 // ★フォルダ単位アップロード時は、個別ファイルのTrash移動ではなく
                 //   全ファイルのアップロードが成功した後にフォルダ全体をTrashへ移動する。
-                return UploadFiles(ticket, allFiles, originalFolderName, folderPath);
+                return UploadFiles(ticket, allFiles, originalFolderName, folderPath, uploadPath);
             }
 
             string[] selectedFiles = null;
@@ -244,7 +247,7 @@ namespace UploadAgent
 
             _logger.Info($"FOLDER_GRID_SELECTED count={selectedFiles.Length} / filtered={allFiles.Length} / total={totalCount}");
             // PHOTO/DRAWINGはグリッドで一部だけ選んだ可能性があるため、フォルダ全体の削除はしない(個別ファイルのみTrash移動)
-            return UploadFiles(ticket, selectedFiles, originalFolderName, null);
+            return UploadFiles(ticket, selectedFiles, originalFolderName, null, uploadPath);
         }
 
         private static string[] FilterFilesByType(string[] files, string fileType)
@@ -395,7 +398,7 @@ namespace UploadAgent
         //   全ファイルのアップロードが成功した後にフォルダ全体をTrashへ移動する。
         //   指定がない場合(=単体ファイル、または写真/図のグリッド選択)は、
         //   従来通り各ファイルを個別にTrashへ移動する。
-        private PickUploadResponse UploadFiles(string ticket, string[] paths, string folderName, string sourceFolderPath)
+        private PickUploadResponse UploadFiles(string ticket, string[] paths, string folderName, string sourceFolderPath, string uploadPath = null)
         {
             var response = new PickUploadResponse { cancelled = false };
             bool moveWholeFolder = !string.IsNullOrEmpty(sourceFolderPath);
@@ -405,7 +408,7 @@ namespace UploadAgent
                 try
                 {
                     // フォルダ全体を後でまとめて移動する場合は、個別ファイルのTrash移動はスキップする
-                    var fileResult = UploadSingleFile(ticket, path, folderName, skipLocalTrash: moveWholeFolder);
+                    var fileResult = UploadSingleFile(ticket, path, folderName, skipLocalTrash: moveWholeFolder, uploadPath: uploadPath);
                     response.files.Add(fileResult);
                 }
                 catch (Exception ex)
@@ -468,16 +471,17 @@ namespace UploadAgent
             return response;
         }
 
-        // ★変更: folderName/skipLocalTrash引数を追加。
-        private UploadedFileResult UploadSingleFile(string ticket, string filePath, string folderName, bool skipLocalTrash = false)
+        // ★変更: folderName/skipLocalTrash/uploadPath引数を追加。
+        private UploadedFileResult UploadSingleFile(string ticket, string filePath, string folderName, bool skipLocalTrash = false, string uploadPath = null)
         {
             var fileName = Path.GetFileName(filePath);
-            _logger.Info($"UPLOAD_START path=\"{filePath}\" folderName=\"{folderName}\"");
+            var effectivePath = string.IsNullOrEmpty(uploadPath) ? DEFAULT_MC_UPLOAD_PATH : uploadPath;
+            _logger.Info($"UPLOAD_START path=\"{filePath}\" folderName=\"{folderName}\" uploadPath=\"{effectivePath}\"");
 
             using (var client = new HttpClient(_sslBypassHandler, disposeHandler: false))
             {
                 client.Timeout = TimeSpan.FromMinutes(5);
-                var url = _settings.MachCoreServerUrl.TrimEnd('/') + "/api/mc/files/upload-by-ticket";
+                var url = _settings.MachCoreServerUrl.TrimEnd('/') + effectivePath;
 
                 using (var content = new MultipartFormDataContent())
                 using (var fileStream = File.OpenRead(filePath))
