@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -49,7 +49,7 @@ namespace UploadAgent
             if (method == "OPTIONS") { ctx.Response.StatusCode = 204; ctx.Response.Close(); return true; }
 
             // 操作系エンドポイント（move/delete/pick系）はOrigin検証必須
-            bool isStateChanging = (path == "/move" || path == "/delete" || path == "/pick-and-upload" || path == "/pick-folder-and-upload" || path == "/pg-to-usb");
+            bool isStateChanging = (path == "/move" || path == "/delete" || path == "/pick-and-upload" || path == "/pick-folder-and-upload" || path == "/pg-to-usb" || path == "/auto-upload");
             if (isStateChanging && !_guard.IsAllowedOrigin(origin, ExpectedOrigin))
             {
                 _logger.Warn($"ORIGIN_REJECTED path=\"{path}\" origin=\"{origin}\" expected=\"{ExpectedOrigin}\"");
@@ -68,6 +68,8 @@ namespace UploadAgent
                 case "/pick-and-upload" when method == "POST": HandlePickAndUpload(ctx, isFolder: false); return true;
                 case "/pick-folder-and-upload" when method == "POST": HandlePickAndUpload(ctx, isFolder: true); return true;
                 case "/pg-to-usb" when method == "POST": HandlePgToUsb(ctx); return true;
+                case "/check-usb-target" when method == "POST": HandleCheckUsbTarget(ctx); return true;
+                case "/auto-upload" when method == "POST": HandleAutoUpload(ctx); return true;
                 default: return false;
             }
         }
@@ -195,6 +197,84 @@ namespace UploadAgent
 
             var result = _uploadCoordinator.PgToUsb(req.ticket, req.apiBaseUrl);
             SendJson(ctx, result.success ? 200 : 400, result);
+        }
+
+        // ── POST /check-usb-target ──────────────────────────────────────────
+        // ★USB自動アップロード対応: 新規登録時点でDBに確定済みのファイル名/フォルダ名が
+        // USB取込元フォルダ内に実在するかどうかだけを確認する（読み取り専用・副作用なし）。
+        private void HandleCheckUsbTarget(HttpListenerContext ctx)
+        {
+            var reqToken = ctx.Request.Headers["X-Agent-Token"] ?? "";
+            if (!_guard.ValidateToken(reqToken))
+            {
+                _logger.Warn($"AUTH_FAIL reason=token_mismatch remote={ctx.Request.RemoteEndPoint} path=/check-usb-target");
+                SendJson(ctx, 401, new { error = "Unauthorized: invalid token" });
+                return;
+            }
+
+            Models.CheckUsbTargetRequest req;
+            try
+            {
+                var body = ReadBody(ctx.Request);
+                req = _json.Deserialize<Models.CheckUsbTargetRequest>(body);
+            }
+            catch (Exception ex)
+            {
+                SendJson(ctx, 400, new { error = $"Invalid JSON: {ex.Message}" });
+                return;
+            }
+
+            if (req == null || string.IsNullOrWhiteSpace(req.name))
+            {
+                SendJson(ctx, 400, new { error = "name is required" });
+                return;
+            }
+
+            // ★パストラバーサル対策: ディレクトリ区切りを含む値が渡されても、
+            //   ファイル名/フォルダ名部分のみを抽出して使用する。
+            var safeName = Path.GetFileName(req.name);
+            var result = _uploadCoordinator.CheckUsbTarget(safeName, req.isFolder);
+            SendJson(ctx, result.success ? 200 : 400, result);
+        }
+
+        // ── POST /auto-upload ────────────────────────────────────────────────
+        // ★USB自動アップロード対応: ファイル/フォルダ選択ダイアログを一切表示せず、
+        // USB取込元フォルダ内の既定名ファイル/フォルダをそのままアップロードする。
+        private void HandleAutoUpload(HttpListenerContext ctx)
+        {
+            var reqToken = ctx.Request.Headers["X-Agent-Token"] ?? "";
+            if (!_guard.ValidateToken(reqToken))
+            {
+                _logger.Warn($"AUTH_FAIL reason=token_mismatch remote={ctx.Request.RemoteEndPoint} path=/auto-upload");
+                SendJson(ctx, 401, new { error = "Unauthorized: invalid token" });
+                return;
+            }
+
+            Models.AutoUploadRequest req;
+            try
+            {
+                var body = ReadBody(ctx.Request);
+                req = _json.Deserialize<Models.AutoUploadRequest>(body);
+            }
+            catch (Exception ex)
+            {
+                SendJson(ctx, 400, new { error = $"Invalid JSON: {ex.Message}" });
+                return;
+            }
+
+            if (req == null || string.IsNullOrWhiteSpace(req.ticket) || string.IsNullOrWhiteSpace(req.name))
+            {
+                SendJson(ctx, 400, new { error = "ticket と name が必要です" });
+                return;
+            }
+
+            // ★パストラバーサル対策: ディレクトリ区切りを含む値が渡されても、
+            //   ファイル名/フォルダ名部分のみを抽出して使用する。
+            var safeName = Path.GetFileName(req.name);
+            _logger.Info($"AUTO_UPLOAD_REQUEST isFolder={req.isFolder} name=\"{safeName}\"");
+
+            var result = _uploadCoordinator.AutoUploadFromUsb(req.ticket, req.fileType, safeName, req.isFolder, req.uploadPath);
+            SendJson(ctx, 200, result);
         }
 
         private void SendJson(HttpListenerContext ctx, int statusCode, object obj)

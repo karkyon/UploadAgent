@@ -62,3 +62,32 @@ namespace UploadAgent.Models
         public string error { get; set; }
     }
 }
+
+namespace UploadAgent.Models
+{
+    // ★USB自動アップロード対応: 新規登録時点でDBに確定済みのファイル名/フォルダ名を用いて、
+    //   ファイル/フォルダ選択ダイアログを表示せずにUSB取込元フォルダ内の実在確認のみを行う。
+    public class CheckUsbTargetRequest
+    {
+        public string name { get; set; }
+        public bool isFolder { get; set; }
+    }
+
+    public class CheckUsbTargetResponse
+    {
+        public bool success { get; set; }
+        public bool configured { get; set; }
+        public bool exists { get; set; }
+        public string path { get; set; }
+        public string error { get; set; }
+    }
+
+    public class AutoUploadRequest
+    {
+        public string ticket { get; set; }
+        public string fileType { get; set; }
+        public string name { get; set; }
+        public bool isFolder { get; set; }
+        public string uploadPath { get; set; }
+    }
+}

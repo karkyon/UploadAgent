@@ -393,6 +393,120 @@ namespace UploadAgent
             }
         }
 
+        /// <summary>
+        /// ★USB自動アップロード対応: 新規登録時点でDBに確定済みのファイル名/フォルダ名(expectedName)が
+        /// USB取込元フォルダ(_settings.UsbDrivePath)内に実在するかどうかを確認する。
+        /// ファイル/フォルダ選択ダイアログは一切表示しない。
+        /// </summary>
+        public Models.CheckUsbTargetResponse CheckUsbTarget(string expectedName, bool isFolder)
+        {
+            var response = new Models.CheckUsbTargetResponse();
+            var usbPath = _settings.GetUsbDrivePathOrNull();
+            if (usbPath == null)
+            {
+                response.success = false;
+                response.configured = false;
+                response.error = "USB取込元フォルダが設定されていません（設定画面で設定してください）";
+                _logger.Warn("CHECK_USB_TARGET_NO_SRC_CONFIGURED");
+                return response;
+            }
+            if (!Directory.Exists(usbPath))
+            {
+                response.success = false;
+                response.configured = true;
+                response.error = $"USB取込元フォルダが見つかりません: {usbPath}（USBが接続されているか確認してください）";
+                _logger.Warn($"CHECK_USB_TARGET_SRC_NOT_FOUND path=\"{usbPath}\"");
+                return response;
+            }
+
+            var targetPath = Path.Combine(usbPath, expectedName);
+            bool exists = isFolder ? Directory.Exists(targetPath) : File.Exists(targetPath);
+
+            response.success = true;
+            response.configured = true;
+            response.exists = exists;
+            response.path = targetPath;
+            if (!exists)
+            {
+                response.error = isFolder
+                    ? $"USBフォルダ内に「{expectedName}」フォルダが見つかりません"
+                    : $"USBフォルダ内に「{expectedName}」ファイルが見つかりません";
+            }
+            _logger.Info($"CHECK_USB_TARGET name=\"{expectedName}\" isFolder={isFolder} exists={exists} path=\"{targetPath}\"");
+            return response;
+        }
+
+        /// <summary>
+        /// ★USB自動アップロード対応: expectedNameで指定されたファイル/フォルダをUSB取込元フォルダから
+        /// そのままアップロードする。CheckUsbTargetで実在確認済みであることを前提とし、
+        /// ファイル/フォルダ選択ダイアログは一切表示しない。既存のUploadFiles()をそのまま再利用するため、
+        /// アップロード成功後のゴミ箱移動などの挙動は従来のフォルダ/単体アップロードと完全に同一。
+        /// </summary>
+        public PickUploadResponse AutoUploadFromUsb(string ticket, string fileType, string expectedName, bool isFolder, string uploadPath = null)
+        {
+            var usbPath = _settings.GetUsbDrivePathOrNull();
+            if (usbPath == null)
+            {
+                _logger.Warn("AUTO_UPLOAD_NO_SRC_CONFIGURED");
+                return new PickUploadResponse { cancelled = false, success = false, error = "USB取込元フォルダが設定されていません（設定画面で設定してください）" };
+            }
+            if (!Directory.Exists(usbPath))
+            {
+                _logger.Warn($"AUTO_UPLOAD_SRC_NOT_FOUND path=\"{usbPath}\"");
+                return new PickUploadResponse { cancelled = false, success = false, error = $"USB取込元フォルダが見つかりません: {usbPath}" };
+            }
+
+            var targetPath = Path.Combine(usbPath, expectedName);
+
+            if (isFolder)
+            {
+                if (!Directory.Exists(targetPath))
+                {
+                    _logger.Warn($"AUTO_UPLOAD_FOLDER_NOT_FOUND path=\"{targetPath}\"");
+                    return new PickUploadResponse { cancelled = false, success = false, error = $"USBフォルダ内に「{expectedName}」フォルダが見つかりません" };
+                }
+
+                string[] allFiles;
+                try
+                {
+                    allFiles = Directory.GetFiles(targetPath, "*", SearchOption.TopDirectoryOnly);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"AUTO_UPLOAD_FOLDER_READ_ERROR path=\"{targetPath}\" err=\"{ex.Message}\"");
+                    return new PickUploadResponse { cancelled = false, success = false, error = $"フォルダ読み取り失敗: {ex.Message}" };
+                }
+
+                int totalCount = allFiles.Length;
+                allFiles = FilterFilesByType(allFiles, fileType);
+
+                if (totalCount == 0)
+                    return new PickUploadResponse { cancelled = false, success = false, error = "フォルダ内にファイルがありません" };
+                if (allFiles.Length == 0)
+                {
+                    string typeLabel = fileType == "PHOTO" ? "写真(jpg/jpeg/png)"
+                                      : fileType == "DRAWING" ? "図面(tif/tiff/pdf)"
+                                      : fileType == "PROGRAM" ? "プログラム"
+                                      : "対応";
+                    return new PickUploadResponse { cancelled = false, success = false, error = $"フォルダ内に{typeLabel}ファイルが見つかりません（全{totalCount}件中0件）" };
+                }
+
+                _logger.Info($"AUTO_UPLOAD_FOLDER count={allFiles.Length} / total={totalCount} folder=\"{targetPath}\" name=\"{expectedName}\"");
+                return UploadFiles(ticket, allFiles, expectedName, targetPath, uploadPath);
+            }
+            else
+            {
+                if (!File.Exists(targetPath))
+                {
+                    _logger.Warn($"AUTO_UPLOAD_FILE_NOT_FOUND path=\"{targetPath}\"");
+                    return new PickUploadResponse { cancelled = false, success = false, error = $"USBフォルダ内に「{expectedName}」ファイルが見つかりません" };
+                }
+
+                _logger.Info($"AUTO_UPLOAD_FILE path=\"{targetPath}\"");
+                return UploadFiles(ticket, new[] { targetPath }, null, null, uploadPath);
+            }
+        }
+
         // ★変更: folderName/sourceFolderPath引数を追加。
         //   sourceFolderPathが指定されている場合(=フォルダ単位アップロード)、
         //   全ファイルのアップロードが成功した後にフォルダ全体をTrashへ移動する。
