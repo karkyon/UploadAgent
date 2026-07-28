@@ -195,7 +195,7 @@ namespace UploadAgent
                 return;
             }
 
-            var result = _uploadCoordinator.PgToUsb(req.ticket, req.apiBaseUrl);
+            var result = _uploadCoordinator.PgToUsb(req.ticket, req.apiBaseUrl, req.system);
             SendJson(ctx, result.success ? 200 : 400, result);
         }
 

@@ -52,6 +52,10 @@ namespace UploadAgent.Models
     {
         public string ticket { get; set; }
         public string apiBaseUrl { get; set; }
+        // [v116] "mc" または "nc"。未指定時は"mc"として扱う(後方互換)。
+        // これによりMC/NCどちらのチケットかをAgentが判別し、
+        // 問い合わせ先を /mc/files/pg-info-by-ticket か /nc/files/pg-info-by-ticket かに切り替える。
+        public string system { get; set; }
     }
 
     public class PgToUsbResponse

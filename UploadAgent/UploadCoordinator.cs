@@ -278,8 +278,12 @@ namespace UploadAgent
         /// PG→USB: チケットでAPIからファイル情報(Base64)を取得し、設定済みUSBドライブへ直接コピーする。
         /// ダイアログは一切表示しない。完了後はAPI側へ完了通知を送ってチケットを破棄させる。
         /// </summary>
-        public Models.PgToUsbResponse PgToUsb(string ticket, string apiBaseUrl)
+        public Models.PgToUsbResponse PgToUsb(string ticket, string apiBaseUrl, string system)
         {
+            // [v116] "mc"/"nc"の判別。未指定・不正値は後方互換のため"mc"として扱う。
+            var sys = (system ?? "mc").Trim().ToLowerInvariant();
+            if (sys != "mc" && sys != "nc") sys = "mc";
+
             var response = new Models.PgToUsbResponse();
             var usbPath = _settings.GetUsbDrivePathOrNull();
             if (usbPath == null)
@@ -302,7 +306,7 @@ namespace UploadAgent
                 using (var client = new HttpClient(_sslBypassHandler, disposeHandler: false))
                 {
                     client.Timeout = TimeSpan.FromSeconds(30);
-                    var url = $"{apiBaseUrl.TrimEnd('/')}/mc/files/pg-info-by-ticket?ticket={Uri.EscapeDataString(ticket)}";
+                    var url = $"{apiBaseUrl.TrimEnd('/')}/{sys}/files/pg-info-by-ticket?ticket={Uri.EscapeDataString(ticket)}";
                     var resp = client.GetAsync(url).GetAwaiter().GetResult();
                     var bodyText = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
@@ -369,7 +373,7 @@ namespace UploadAgent
                     // 完了通知（チケット破棄）— Web側からも呼ばれるが、Agent側からも確実に送る
                     try
                     {
-                        var completeUrl = $"{apiBaseUrl.TrimEnd('/')}/mc/files/pg-to-usb-complete";
+                        var completeUrl = $"{apiBaseUrl.TrimEnd('/')}/{sys}/files/pg-to-usb-complete";
                         var completeBody = new StringContent(
                             _json.Serialize(new Dictionary<string, string> { ["ticket"] = ticket }),
                             Encoding.UTF8, "application/json");
